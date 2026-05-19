@@ -282,11 +282,16 @@ async function sendMessage() {
   document.getElementById('send-btn').disabled = true;
   try {
     const reply = await callGroq(msg);
-    removeTyping();
     if (reply) {
-      addMessage('jarvis', reply);
       addLog('Response generated');
-      voiceEngine.speak(reply);
+      
+      // Wait for audio to actually start before revealing text
+      voiceEngine.speak(reply, () => {
+        removeTyping();
+        addMessage('jarvis', reply);
+      });
+    } else {
+      removeTyping();
     }
   } catch (e) {
     removeTyping();

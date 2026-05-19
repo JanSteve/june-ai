@@ -159,8 +159,11 @@ class JarvisVoiceEngine {
   // PLAYBACK
   // ═══════════════════════════════════════════════
 
-  async speak(text) {
-    if (!document.getElementById('auto-speak')?.checked) return;
+  async speak(text, onPlaybackStart = null) {
+    if (!document.getElementById('auto-speak')?.checked) {
+      if (onPlaybackStart) onPlaybackStart();
+      return;
+    }
 
     this.stop();
     this._cancelled = false;
@@ -171,14 +174,14 @@ class JarvisVoiceEngine {
     try {
       const chunks = this._splitForElevenLabs(text);
       this._queue = [...chunks];
-      await this._playNextChunk(0);
+      await this._playNextChunk(0, onPlaybackStart);
     } catch (err) {
       console.warn('[JARVIS Voice] ElevenLabs failed, using browser fallback:', err.message);
-      this._browserFallback(text);
+      this._browserFallback(text, onPlaybackStart);
     }
   }
 
-  async _playNextChunk(index) {
+  async _playNextChunk(index, onPlaybackStart) {
     if (this._cancelled || index >= this._queue.length) {
       this._finish();
       return;
@@ -188,7 +191,7 @@ class JarvisVoiceEngine {
       const audioUrl = await this._callElevenLabs(this._queue[index]);
       if (this._cancelled) return;
 
-      await this._playAudio(audioUrl);
+      await this._playAudio(audioUrl, index === 0 ? onPlaybackStart : null);
 
       // Small pause between chunks for breath
       if (index < this._queue.length - 1 && !this._cancelled) {
@@ -203,12 +206,16 @@ class JarvisVoiceEngine {
     }
   }
 
-  _playAudio(url) {
+  _playAudio(url, onStart) {
     return new Promise((resolve, reject) => {
       const audio = new Audio(url);
       audio.playbackRate = this.rate;
       this._currentAudio = audio;
 
+      audio.onplay = () => {
+        if (onStart) onStart();
+      };
+      
       audio.onended = () => {
         URL.revokeObjectURL(url);
         resolve();
@@ -226,12 +233,15 @@ class JarvisVoiceEngine {
   // BROWSER FALLBACK (if ElevenLabs fails)
   // ═══════════════════════════════════════════════
 
-  _browserFallback(text) {
+  _browserFallback(text, onPlaybackStart) {
     const clean = this._cleanText(text).substring(0, 1000);
     const utter = new SpeechSynthesisUtterance(clean);
     if (this.browserVoice) utter.voice = this.browserVoice;
     utter.rate = 0.92;
     utter.pitch = 0.95;
+    utter.onstart = () => {
+      if (onPlaybackStart) onPlaybackStart();
+    };
     utter.onend = () => this._finish();
     utter.onerror = () => this._finish();
     this.synth.speak(utter);
