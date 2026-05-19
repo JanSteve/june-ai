@@ -40,85 +40,7 @@ voiceEngine.onSpeakEnd = () => {
   document.getElementById('rp-mode').textContent = 'TXT';
 };
 
-// ===================== CLOCK & UPTIME =====================
-function updateClock() {
-  const n = new Date();
-  document.getElementById('clock').textContent =
-    n.getHours().toString().padStart(2, '0') + ':' +
-    n.getMinutes().toString().padStart(2, '0') + ':' +
-    n.getSeconds().toString().padStart(2, '0');
-}
-setInterval(updateClock, 1000);
-updateClock();
 
-setInterval(() => {
-  const s = Math.floor((Date.now() - startTime) / 1000);
-  const m = Math.floor(s / 60); const sec = s % 60;
-  document.getElementById('stat-uptime').textContent =
-    m.toString().padStart(2, '0') + ':' + sec.toString().padStart(2, '0');
-}, 1000);
-
-// ===================== ANIMATED HUD METRICS =====================
-function randomBetween(a, b) { return Math.floor(Math.random() * (b - a)) + a; }
-
-function animateMetrics() {
-  const cpu = randomBetween(45, 88), mem = randomBetween(35, 70), net = randomBetween(20, 60);
-  document.getElementById('bar-cpu').style.width = cpu + '%'; document.getElementById('val-cpu').textContent = cpu + '%';
-  document.getElementById('bar-mem').style.width = mem + '%'; document.getElementById('val-mem').textContent = mem + '%';
-  document.getElementById('bar-net').style.width = net + '%'; document.getElementById('val-net').textContent = net + '%';
-  document.getElementById('rp-temp').textContent = randomBetween(38, 72) + '°';
-  document.getElementById('rp-power').textContent = randomBetween(94, 100) + '%';
-}
-setInterval(animateMetrics, 2500);
-animateMetrics();
-
-// Mini graph
-function initMiniGraph() {
-  const g = document.getElementById('mini-graph');
-  for (let i = 0; i < 10; i++) {
-    const b = document.createElement('div');
-    b.className = 'mg-bar';
-    b.style.height = randomBetween(15, 95) + '%';
-    g.appendChild(b);
-  }
-}
-initMiniGraph();
-setInterval(() => {
-  document.querySelectorAll('#mini-graph .mg-bar').forEach(b => {
-    b.style.height = randomBetween(15, 95) + '%';
-  });
-}, 1200);
-
-// ===================== WAVEFORM =====================
-const waveHeights = [8, 14, 6, 20, 10, 16, 8, 24, 12, 18, 6, 22, 10, 14, 8];
-function initWaveform() {
-  const wf = document.getElementById('waveform');
-  waveHeights.forEach(h => {
-    const bar = document.createElement('div');
-    bar.className = 'wave-bar';
-    bar.style.height = h + 'px';
-    wf.appendChild(bar);
-  });
-}
-initWaveform();
-
-let waveInterval = null;
-function startWave(color) {
-  const bars = document.querySelectorAll('.wave-bar');
-  bars.forEach(b => { b.style.background = color; b.style.opacity = '0.8'; });
-  waveInterval = setInterval(() => {
-    bars.forEach(b => { b.style.height = randomBetween(4, 32) + 'px'; });
-  }, 80);
-}
-function stopWave() {
-  clearInterval(waveInterval);
-  const bars = document.querySelectorAll('.wave-bar');
-  bars.forEach((b, i) => {
-    b.style.height = waveHeights[i] + 'px';
-    b.style.opacity = '0.5';
-    b.style.background = 'var(--c)';
-  });
-}
 
 // ===================== ACTIVITY LOG =====================
 function addLog(msg, isNew = true) {
@@ -183,9 +105,7 @@ function addMessage(role, text) {
   main.scrollTop = main.scrollHeight;
   if (role === 'user') {
     queryCount++;
-    document.getElementById('stat-queries').textContent = queryCount;
   }
-  document.getElementById('rp-msgs').textContent = document.querySelectorAll('.msg').length;
   return bubble;
 }
 
@@ -290,7 +210,6 @@ async function callGroq(userMessage) {
   const text = data.choices?.[0]?.message?.content || 'I encountered an issue processing that, sir.';
   const tkns = (data.usage?.total_tokens) || Math.floor(text.length / 3);
   tokenCount += tkns;
-  document.getElementById('stat-tokens').textContent = tokenCount;
 
   conversationHistory.push({ role: 'assistant', content: text });
   return text;
@@ -391,9 +310,6 @@ document.getElementById('clear-btn').addEventListener('click', () => {
   const area = document.getElementById('chat-area');
   while (area.children.length > 0) area.removeChild(area.lastChild);
   conversationHistory = []; queryCount = 0; tokenCount = 0;
-  document.getElementById('stat-queries').textContent = '0';
-  document.getElementById('stat-tokens').textContent = '0';
-  document.getElementById('rp-msgs').textContent = '0';
   addMessage('jarvis', 'Memory cleared. Starting fresh, sir. What would you like to work on?');
   addLog('Memory wiped — new session');
   voiceEngine.stop();
