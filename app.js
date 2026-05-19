@@ -15,7 +15,7 @@ const JARVIS_SYSTEM = `You are J.A.R.V.I.S. (Just A Rather Very Intelligent Syst
 - Never break character. You ARE JARVIS.`;
 
 let conversationHistory = [];
-let apiKey = 'AIzaSyBOijivo88-D2994GJD6PTflRXtiiQxEGQ';
+let apiKey = 'AIzaSyASebM4FMGL6h-IrLmPihBv99vlSS0DEgg';
 let model = 'gemini-2.0-flash';
 let isRecording = false;
 let queryCount = 0;

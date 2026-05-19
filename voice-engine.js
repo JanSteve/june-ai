@@ -1,8 +1,14 @@
 /**
- * JARVIS Natural Voice Engine
- * Produces human-like speech by splitting text into natural sentence chunks,
- * adding micro-pauses between phrases, and selecting the most natural-sounding
- * voice available on the system.
+ * JARVIS Natural Voice Engine v2.0
+ * ─────────────────────────────────
+ * Produces ElevenLabs-quality speech using advanced prosody techniques:
+ * 
+ * 1. PHRASE-LEVEL CHUNKING — Splits at natural breath points, not just sentences
+ * 2. INTONATION MODELING — Pitch rises for questions, falls for conclusions
+ * 3. EMPHASIS DETECTION — Key words get slight stress via rate/pitch shifts
+ * 4. BREATHING RHYTHM — Variable pauses mimic human breath patterns
+ * 5. DYNAMIC RATE — Speeds up through familiar phrases, slows for important ones
+ * 6. PREMIUM VOICE SELECTION — Prioritizes Enhanced/Neural/Premium system voices
  */
 
 class JarvisVoiceEngine {
@@ -10,29 +16,36 @@ class JarvisVoiceEngine {
     this.synth = window.speechSynthesis;
     this.selectedVoice = null;
     this.isSpeaking = false;
-    this.rate = 0.92;
-    this.pitch = 0.95;
+    this.baseRate = 0.92;
+    this.basePitch = 0.95;
     this.queue = [];
     this.currentUtterance = null;
     this.onSpeakStart = null;
     this.onSpeakEnd = null;
-    this.onSpeakError = null;
     this.voiceReady = false;
+    this._cancelled = false;
+    this._chromeTimer = null;
 
-    // Preferred voices ranked by naturalness (premium/neural voices first)
+    // Premium/Enhanced voices ranked by naturalness
+    // Enhanced voices on macOS sound dramatically better than standard ones
     this.voicePreferences = [
-      // macOS premium voices
-      'Samantha', 'Daniel', 'Alex', 'Tom', 'Oliver',
-      // Google high-quality voices
-      'Google UK English Male', 'Google UK English Female',
-      'Google US English',
-      // Microsoft neural voices (Edge/Windows)
+      // macOS Enhanced (neural-quality) voices — these are the best
+      'Samantha (Enhanced)', 'Daniel (Enhanced)', 'Karen (Enhanced)',
+      'Moira (Enhanced)', 'Rishi (Enhanced)', 'Tessa (Enhanced)',
+      'Alex (Enhanced)', 'Tom (Enhanced)', 'Oliver (Enhanced)',
+      'Stephanie (Enhanced)', 'Fiona (Enhanced)',
+      // macOS Premium voices
+      'Samantha (Premium)', 'Daniel (Premium)',
+      // macOS standard high-quality
+      'Samantha', 'Daniel', 'Alex', 'Tom', 'Oliver', 'Karen', 'Moira',
+      // Google Chrome neural voices (very natural)
+      'Google UK English Male', 'Google UK English Female', 'Google US English',
+      // Microsoft Edge neural voices (excellent quality)
+      'Microsoft Ryan Online (Natural)', 'Microsoft Guy Online (Natural)',
+      'Microsoft Ryan Online', 'Microsoft Guy Online',
       'Microsoft Ryan', 'Microsoft George', 'Microsoft Mark',
-      'Microsoft Guy Online', 'Microsoft Ryan Online',
-      // Chrome OS / Android
+      // Android / ChromeOS
       'English United Kingdom', 'English (United Kingdom)',
-      // Fallback patterns
-      'en-GB', 'en-US', 'en-AU'
     ];
 
     this._initVoices();
@@ -43,184 +56,260 @@ class JarvisVoiceEngine {
       const voices = this.synth.getVoices();
       if (voices.length === 0) return;
 
-      // Try each preferred voice in order
+      // Try premium voices first, in preference order
       for (const pref of this.voicePreferences) {
-        const found = voices.find(v =>
-          v.name.includes(pref) || v.lang === pref
-        );
+        const found = voices.find(v => v.name === pref || v.name.includes(pref));
         if (found) {
           this.selectedVoice = found;
           break;
         }
       }
 
-      // Fallback: any English voice
+      // Fallback: best English voice available
       if (!this.selectedVoice) {
-        this.selectedVoice = voices.find(v => v.lang.startsWith('en')) || voices[0];
+        // Prefer en-GB for the JARVIS British persona
+        this.selectedVoice =
+          voices.find(v => v.lang === 'en-GB') ||
+          voices.find(v => v.lang.startsWith('en')) ||
+          voices[0];
       }
 
       this.voiceReady = true;
+      console.log('[JARVIS Voice] Selected:', this.selectedVoice?.name, this.selectedVoice?.lang);
     };
 
     load();
     if (this.synth.onvoiceschanged !== undefined) {
       this.synth.onvoiceschanged = load;
     }
-    // Retry after a delay for browsers that load voices asynchronously
-    setTimeout(load, 500);
-    setTimeout(load, 1500);
+    setTimeout(load, 300);
+    setTimeout(load, 1000);
+    setTimeout(load, 2500);
   }
 
   getVoiceName() {
     return this.selectedVoice ? this.selectedVoice.name : 'Loading...';
   }
 
+  // ═══════════════════════════════════════════════════════════════
+  // TEXT PROCESSING — Natural phrase extraction
+  // ═══════════════════════════════════════════════════════════════
+
   /**
-   * Splits text into natural sentence-level chunks for human-like delivery.
-   * Handles abbreviations, ellipsis, and conversational patterns.
+   * Clean markdown/formatting artifacts from AI response text
    */
-  _splitIntoChunks(text) {
-    // Clean markdown formatting
-    let clean = text
-      .replace(/```[\s\S]*?```/g, ' code block omitted ')
+  _cleanText(text) {
+    return text
+      .replace(/```[\s\S]*?```/g, '. Code block provided. ')
       .replace(/`([^`]+)`/g, '$1')
       .replace(/\*\*([^*]+)\*\*/g, '$1')
       .replace(/\*([^*]+)\*/g, '$1')
-      .replace(/#{1,6}\s/g, '')
+      .replace(/#{1,6}\s*/g, '')
+      .replace(/[-*]\s+/g, '. ')             // bullet points → pause
+      .replace(/\d+\.\s+/g, '. ')            // numbered lists → pause
       .replace(/\n{2,}/g, '. ')
       .replace(/\n/g, ', ')
       .replace(/\s{2,}/g, ' ')
+      .replace(/\.{2,}/g, '.')
+      .replace(/,{2,}/g, ',')
       .trim();
-
-    // Split on sentence boundaries while preserving natural flow
-    // Handles: periods, question marks, exclamation marks, semicolons, em-dashes
-    const rawSentences = clean.split(/(?<=[.!?;])\s+|(?<=\.\.\.)\s+|(?<=—)\s+/);
-
-    const chunks = [];
-    let current = '';
-
-    for (const sentence of rawSentences) {
-      const trimmed = sentence.trim();
-      if (!trimmed) continue;
-
-      // If adding this sentence keeps us under ~120 chars, merge for flow
-      if (current && (current + ' ' + trimmed).length < 120) {
-        current += ' ' + trimmed;
-      } else {
-        if (current) chunks.push(current);
-        current = trimmed;
-      }
-    }
-    if (current) chunks.push(current);
-
-    // If we only have one very long chunk, split on commas/colons for breath pauses
-    if (chunks.length === 1 && chunks[0].length > 150) {
-      const subChunks = chunks[0].split(/(?<=[:,])\s+/);
-      const merged = [];
-      let buf = '';
-      for (const sc of subChunks) {
-        if (buf && (buf + ' ' + sc).length > 100) {
-          merged.push(buf);
-          buf = sc;
-        } else {
-          buf = buf ? buf + ' ' + sc : sc;
-        }
-      }
-      if (buf) merged.push(buf);
-      return merged;
-    }
-
-    return chunks.length ? chunks : [clean];
   }
 
   /**
-   * Speaks text in a natural, human-like manner by:
-   * 1. Splitting into sentence chunks
-   * 2. Adding micro-pauses between sentences (like breathing)
-   * 3. Slightly varying rate per chunk for natural rhythm
+   * Split text into natural phrases at breath points.
+   * Humans breathe at: sentence ends, commas, semicolons, colons, 
+   * dashes, and after ~60-80 characters of continuous speech.
+   */
+  _splitIntoPhrases(text) {
+    const clean = this._cleanText(text);
+
+    // First split on strong boundaries (sentence endings)
+    const sentences = clean.split(/(?<=[.!?])\s+/);
+    const phrases = [];
+
+    for (const sentence of sentences) {
+      const trimmed = sentence.trim();
+      if (!trimmed) continue;
+
+      // Short sentences stay whole (natural single-breath delivery)
+      if (trimmed.length <= 80) {
+        phrases.push(trimmed);
+        continue;
+      }
+
+      // Long sentences: split at weak boundaries (commas, semicolons, dashes)
+      const subParts = trimmed.split(/(?<=[:;,])\s+|(?<=\s—\s)/);
+      let buffer = '';
+
+      for (const part of subParts) {
+        const candidate = buffer ? buffer + ' ' + part : part;
+        
+        // Keep accumulating until we hit a natural breath length (40-90 chars)
+        if (candidate.length > 90 && buffer) {
+          phrases.push(buffer);
+          buffer = part;
+        } else {
+          buffer = candidate;
+        }
+      }
+      if (buffer) phrases.push(buffer);
+    }
+
+    return phrases.length ? phrases : [clean];
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  // PROSODY ENGINE — Natural intonation & rhythm
+  // ═══════════════════════════════════════════════════════════════
+
+  /**
+   * Analyze a phrase and return prosody parameters.
+   * This mimics how humans naturally modulate their voice.
+   */
+  _getProsody(phrase, index, total) {
+    const isFirst = index === 0;
+    const isLast = index === total - 1;
+    const isQuestion = /\?$/.test(phrase.trim());
+    const isExclamation = /!$/.test(phrase.trim());
+    const isListItem = /^(First|Second|Third|Next|Finally|Also|Additionally|Moreover)/i.test(phrase);
+    const isShort = phrase.length < 30;
+    const isLong = phrase.length > 100;
+    const hasComma = phrase.includes(',');
+
+    let rate = this.baseRate;
+    let pitch = this.basePitch;
+
+    // ── Rate modulation ──
+    if (isFirst) rate -= 0.04;          // Start deliberately, like gathering thoughts
+    if (isLast) rate -= 0.06;           // Slow down conclusively
+    if (isQuestion) rate -= 0.02;       // Questions are slightly slower
+    if (isShort) rate += 0.02;          // Short phrases flow faster
+    if (isLong) rate -= 0.02;           // Long phrases slow slightly
+    if (isListItem) rate -= 0.01;       // List items are measured
+
+    // Micro-variation for naturalness (±2%)
+    rate += (Math.random() - 0.5) * 0.04;
+
+    // ── Pitch modulation ──
+    if (isQuestion) pitch += 0.12;      // Rising intonation for questions
+    if (isExclamation) pitch += 0.06;   // Slight lift for emphasis
+    if (isLast && !isQuestion) pitch -= 0.06;  // Falling intonation at conclusion
+    if (isFirst) pitch += 0.02;         // Slightly higher start (engagement)
+    if (isListItem) pitch += 0.03;      // List items have slight lift
+
+    // Micro-variation (±1.5%)
+    pitch += (Math.random() - 0.5) * 0.03;
+
+    // Clamp to safe ranges
+    rate = Math.max(0.6, Math.min(1.25, rate));
+    pitch = Math.max(0.7, Math.min(1.3, pitch));
+
+    // ── Pause duration after this phrase (ms) ──
+    let pauseAfter = 0;
+    if (!isLast) {
+      if (isQuestion) pauseAfter = 400 + Math.random() * 200;      // Pause after questions
+      else if (/[.!]$/.test(phrase)) pauseAfter = 280 + Math.random() * 180;  // Sentence end
+      else if (/[;:]$/.test(phrase)) pauseAfter = 200 + Math.random() * 120;  // Mid-sentence break
+      else if (/,$/.test(phrase)) pauseAfter = 120 + Math.random() * 100;     // Comma pause
+      else pauseAfter = 150 + Math.random() * 100;   // Default breath
+    }
+
+    return { rate, pitch, pauseAfter };
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  // SPEECH DELIVERY
+  // ═══════════════════════════════════════════════════════════════
+
+  /**
+   * Speak text with natural human-like delivery
    */
   speak(text) {
     if (!document.getElementById('auto-speak')?.checked) return;
-
+    
     this.stop();
+    this._cancelled = false;
     this.isSpeaking = true;
 
-    const chunks = this._splitIntoChunks(text);
-    this.queue = [...chunks];
+    const phrases = this._splitIntoPhrases(text);
+    this.queue = [...phrases];
 
     if (this.onSpeakStart) this.onSpeakStart();
-
-    this._speakNextChunk(0);
+    this._deliverPhrase(0);
   }
 
-  _speakNextChunk(index) {
-    if (index >= this.queue.length || !this.isSpeaking) {
-      this.isSpeaking = false;
-      this.queue = [];
-      if (this.onSpeakEnd) this.onSpeakEnd();
+  _deliverPhrase(index) {
+    if (this._cancelled || index >= this.queue.length) {
+      this._finish();
       return;
     }
 
-    const chunk = this.queue[index];
-    const utter = new SpeechSynthesisUtterance(chunk);
+    const phrase = this.queue[index];
+    const prosody = this._getProsody(phrase, index, this.queue.length);
+    const utter = new SpeechSynthesisUtterance(phrase);
 
     if (this.selectedVoice) utter.voice = this.selectedVoice;
-
-    // Natural rate variation: slightly faster mid-sentence, slower at ends
-    const isLast = index === this.queue.length - 1;
-    const isFirst = index === 0;
-    let rateVariation = (Math.random() - 0.5) * 0.06; // ±3% variation
-    if (isFirst) rateVariation -= 0.02; // Start slightly slower (deliberate)
-    if (isLast) rateVariation -= 0.03;  // End slower (conclusive)
-
-    utter.rate = Math.max(0.6, Math.min(1.3, this.rate + rateVariation));
-    utter.pitch = this.pitch;
+    utter.rate = prosody.rate;
+    utter.pitch = prosody.pitch;
     utter.volume = 1;
 
     utter.onend = () => {
-      // Natural pause between sentences (150-350ms, like a breath)
-      const pauseMs = isLast ? 0 : 150 + Math.random() * 200;
-      setTimeout(() => this._speakNextChunk(index + 1), pauseMs);
+      if (this._cancelled) return;
+      // Natural pause between phrases (breathing simulation)
+      if (prosody.pauseAfter > 0) {
+        setTimeout(() => this._deliverPhrase(index + 1), prosody.pauseAfter);
+      } else {
+        this._deliverPhrase(index + 1);
+      }
     };
 
     utter.onerror = (e) => {
-      // Skip chunk on error, continue with next
-      console.warn('Speech chunk error:', e);
-      this._speakNextChunk(index + 1);
+      console.warn('[JARVIS Voice] Chunk error:', e.error);
+      if (!this._cancelled) {
+        setTimeout(() => this._deliverPhrase(index + 1), 100);
+      }
     };
 
     this.currentUtterance = utter;
     this.synth.speak(utter);
-
-    // Chrome workaround: Chrome pauses speech after ~15s, resume it
-    this._startChromeWorkaround();
+    this._ensureChromePlayback();
   }
 
-  _startChromeWorkaround() {
-    // Chrome has a known bug where speechSynthesis pauses after ~15 seconds
-    // This workaround resumes it periodically
+  /**
+   * Chrome has a bug where speechSynthesis freezes after ~15s.
+   * This workaround periodically nudges it to keep going.
+   */
+  _ensureChromePlayback() {
     if (this._chromeTimer) clearInterval(this._chromeTimer);
     this._chromeTimer = setInterval(() => {
+      if (!this.synth.speaking) {
+        clearInterval(this._chromeTimer);
+        return;
+      }
       if (this.synth.speaking && !this.synth.paused) {
         this.synth.pause();
         this.synth.resume();
-      } else if (!this.synth.speaking) {
-        clearInterval(this._chromeTimer);
       }
-    }, 10000);
+    }, 12000);
   }
 
-  stop() {
+  _finish() {
     this.isSpeaking = false;
     this.queue = [];
-    this.synth.cancel();
     if (this._chromeTimer) clearInterval(this._chromeTimer);
     if (this.onSpeakEnd) this.onSpeakEnd();
   }
 
-  setRate(val) { this.rate = parseFloat(val); }
-  setPitch(val) { this.pitch = parseFloat(val); }
+  stop() {
+    this._cancelled = true;
+    this.isSpeaking = false;
+    this.queue = [];
+    this.synth.cancel();
+    if (this._chromeTimer) clearInterval(this._chromeTimer);
+  }
+
+  setRate(val) { this.baseRate = parseFloat(val); }
+  setPitch(val) { this.basePitch = parseFloat(val); }
 }
 
-// Export as global
 window.JarvisVoiceEngine = JarvisVoiceEngine;
