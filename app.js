@@ -15,7 +15,7 @@ const JARVIS_SYSTEM = `You are J.A.R.V.I.S. (Just A Rather Very Intelligent Syst
 - Never break character. You ARE JARVIS.`;
 
 let conversationHistory = [];
-let apiKey = '';
+let apiKey = 'AIzaSyBOijivo88-D2994GJD6PTflRXtiiQxEGQ';
 let model = 'gemini-2.0-flash';
 let isRecording = false;
 let queryCount = 0;
@@ -343,5 +343,24 @@ setTimeout(() => {
 }, 2000);
 
 addLog('JARVIS UI initialized');
-addLog('Awaiting API key...', false);
-setState('standby');
+
+// ===================== AUTO-BOOT SEQUENCE =====================
+function bootJarvis() {
+  document.getElementById('api-key-input').value = '••••••••••••••••••••';
+  model = document.getElementById('model-select').value;
+  document.getElementById('conn-status').textContent = 'GEMINI CONNECTED';
+  document.getElementById('conn-status').style.color = 'var(--cg)';
+  addLog('API key pre-loaded');
+  addLog('Neural core: ' + model);
+  showToast('✓ JARVIS neural core online');
+  setState('standby');
+
+  // Clear initial greeting and replace with boot message
+  const area = document.getElementById('chat-area');
+  while (area.children.length > 0) area.removeChild(area.lastChild);
+  addMessage('jarvis', 'Neural core engaged. Running on ' + model + '. All systems operational, sir. I am at your complete disposal — what shall we work on today?');
+  voiceEngine.speak('Neural core engaged. All systems operational, sir. I am at your complete disposal. What shall we work on today?');
+}
+
+// Boot after voices load
+setTimeout(bootJarvis, 2500);
