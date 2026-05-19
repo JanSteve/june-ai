@@ -133,14 +133,26 @@ function addLog(msg, isNew = true) {
 
 // ===================== STATE =====================
 function setState(state) {
-  const el = document.getElementById('state-text');
-  el.className = '';
-  const states = { standby: 'STANDBY', listening: 'LISTENING...', thinking: 'PROCESSING...', speaking: 'SPEAKING...', error: 'ERROR' };
-  el.textContent = states[state] || state.toUpperCase();
-  if (state === 'listening') { el.classList.add('active'); startWave('var(--cr)'); }
-  else if (state === 'thinking') { el.classList.add('thinking'); startWave('var(--ca)'); }
-  else if (state === 'speaking') { el.classList.add('speaking'); startWave('var(--cg)'); }
-  else { stopWave(); }
+  const orb = document.getElementById('status-orb');
+  const ind = document.getElementById('voice-indicator');
+  
+  if (state === 'listening') {
+    orb.style.background = '#ef4444';
+    orb.style.boxShadow = '0 0 12px #ef4444';
+    ind.classList.remove('hidden');
+  } else if (state === 'thinking') {
+    orb.style.background = '#eab308';
+    orb.style.boxShadow = '0 0 12px #eab308';
+    ind.classList.add('hidden');
+  } else if (state === 'speaking') {
+    orb.style.background = 'var(--accent)';
+    orb.style.boxShadow = '0 0 12px var(--accent)';
+    ind.classList.remove('hidden');
+  } else {
+    orb.style.background = 'var(--text-muted)';
+    orb.style.boxShadow = 'none';
+    ind.classList.add('hidden');
+  }
 }
 
 function showToast(msg) {
@@ -154,12 +166,21 @@ function showToast(msg) {
 function addMessage(role, text) {
   const area = document.getElementById('chat-area');
   const msg = document.createElement('div'); msg.className = 'msg ' + role;
-  const label = document.createElement('div'); label.className = 'msg-label';
-  label.textContent = role === 'user' ? 'YOU' : 'J.A.R.V.I.S.';
-  const bubble = document.createElement('div'); bubble.className = 'msg-bubble';
-  bubble.textContent = text;
-  msg.appendChild(label); msg.appendChild(bubble); area.appendChild(msg);
-  area.scrollTop = area.scrollHeight;
+  
+  const avatar = document.createElement('div'); avatar.className = 'avatar';
+  if (role === 'jarvis') {
+    avatar.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/></svg>';
+  }
+  
+  const content = document.createElement('div'); content.className = 'msg-content';
+  content.textContent = text;
+  
+  msg.appendChild(avatar); 
+  msg.appendChild(content); 
+  area.appendChild(msg);
+  
+  const main = document.getElementById('main-container');
+  main.scrollTop = main.scrollHeight;
   if (role === 'user') {
     queryCount++;
     document.getElementById('stat-queries').textContent = queryCount;
@@ -171,11 +192,16 @@ function addMessage(role, text) {
 function addTyping() {
   const area = document.getElementById('chat-area');
   const msg = document.createElement('div'); msg.className = 'msg jarvis'; msg.id = 'typing-msg';
-  const label = document.createElement('div'); label.className = 'msg-label'; label.textContent = 'J.A.R.V.I.S.';
-  const bubble = document.createElement('div'); bubble.className = 'msg-bubble';
-  bubble.innerHTML = '<div class="typing-indicator"><div class="typing-dot"></div><div class="typing-dot"></div><div class="typing-dot"></div></div>';
-  msg.appendChild(label); msg.appendChild(bubble); area.appendChild(msg);
-  area.scrollTop = area.scrollHeight;
+  
+  const avatar = document.createElement('div'); avatar.className = 'avatar';
+  avatar.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/></svg>';
+  
+  const content = document.createElement('div'); content.className = 'msg-content';
+  content.innerHTML = '<div class="typing-indicator"><div class="typing-dots"><div class="typing-dot"></div><div class="typing-dot"></div><div class="typing-dot"></div></div></div>';
+  
+  msg.appendChild(avatar); msg.appendChild(content); area.appendChild(msg);
+  const main = document.getElementById('main-container');
+  main.scrollTop = main.scrollHeight;
 }
 function removeTyping() { const t = document.getElementById('typing-msg'); if (t) t.remove(); }
 
@@ -274,7 +300,10 @@ async function sendMessage() {
   const input = document.getElementById('text-input');
   const msg = input.value.trim();
   if (!msg) return;
+  
   input.value = '';
+  input.style.height = 'auto'; // reset resize
+  
   addMessage('user', msg);
   addLog('Query: ' + msg.substring(0, 28) + '...');
   setState('thinking');
@@ -309,9 +338,33 @@ async function sendMessage() {
 
 // ===================== CONTROLS =====================
 document.getElementById('send-btn').addEventListener('click', sendMessage);
-document.getElementById('text-input').addEventListener('keydown', e => {
-  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+
+const textInput = document.getElementById('text-input');
+textInput.addEventListener('keydown', e => {
+  if (e.key === 'Enter' && !e.shiftKey) { 
+    e.preventDefault(); 
+    sendMessage(); 
+  }
 });
+textInput.addEventListener('input', function() {
+  this.style.height = 'auto';
+  this.style.height = (this.scrollHeight) + 'px';
+  document.getElementById('send-btn').disabled = this.value.trim().length === 0;
+});
+
+// Settings Modal
+const settingsPanel = document.getElementById('settings-panel');
+const settingsOverlay = document.getElementById('settings-overlay');
+document.getElementById('settings-btn').addEventListener('click', () => {
+  settingsPanel.classList.remove('hidden');
+  settingsOverlay.classList.remove('hidden');
+});
+const closeSettings = () => {
+  settingsPanel.classList.add('hidden');
+  settingsOverlay.classList.add('hidden');
+};
+document.getElementById('close-settings').addEventListener('click', closeSettings);
+settingsOverlay.addEventListener('click', closeSettings);
 
 // Model selector now uses Groq models
 document.getElementById('model-select').addEventListener('change', e => {
