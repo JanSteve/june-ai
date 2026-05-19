@@ -1,103 +1,83 @@
 /**
- * JARVIS Natural Voice Engine v2.0
- * ─────────────────────────────────
- * Produces ElevenLabs-quality speech using advanced prosody techniques:
- * 
- * 1. PHRASE-LEVEL CHUNKING — Splits at natural breath points, not just sentences
- * 2. INTONATION MODELING — Pitch rises for questions, falls for conclusions
- * 3. EMPHASIS DETECTION — Key words get slight stress via rate/pitch shifts
- * 4. BREATHING RHYTHM — Variable pauses mimic human breath patterns
- * 5. DYNAMIC RATE — Speeds up through familiar phrases, slows for important ones
- * 6. PREMIUM VOICE SELECTION — Prioritizes Enhanced/Neural/Premium system voices
+ * JARVIS Voice Engine v3.0 — ElevenLabs Integration
+ * ───────────────────────────────────────────────────
+ * Uses ElevenLabs' neural TTS for truly human-quality speech.
+ * Falls back to browser Speech Synthesis if ElevenLabs fails.
  */
 
 class JarvisVoiceEngine {
-  constructor() {
-    this.synth = window.speechSynthesis;
-    this.selectedVoice = null;
+  constructor(elevenLabsKey) {
+    this.apiKey = elevenLabsKey;
     this.isSpeaking = false;
-    this.baseRate = 0.92;
-    this.basePitch = 0.95;
-    this.queue = [];
-    this.currentUtterance = null;
     this.onSpeakStart = null;
     this.onSpeakEnd = null;
-    this.voiceReady = false;
     this._cancelled = false;
-    this._chromeTimer = null;
+    this._currentAudio = null;
+    this._queue = [];
 
-    // Premium/Enhanced voices ranked by naturalness
-    // Enhanced voices on macOS sound dramatically better than standard ones
-    this.voicePreferences = [
-      // macOS Enhanced (neural-quality) voices — these are the best
-      'Samantha (Enhanced)', 'Daniel (Enhanced)', 'Karen (Enhanced)',
-      'Moira (Enhanced)', 'Rishi (Enhanced)', 'Tessa (Enhanced)',
-      'Alex (Enhanced)', 'Tom (Enhanced)', 'Oliver (Enhanced)',
-      'Stephanie (Enhanced)', 'Fiona (Enhanced)',
-      // macOS Premium voices
-      'Samantha (Premium)', 'Daniel (Premium)',
-      // macOS standard high-quality
-      'Samantha', 'Daniel', 'Alex', 'Tom', 'Oliver', 'Karen', 'Moira',
-      // Google Chrome neural voices (very natural)
-      'Google UK English Male', 'Google UK English Female', 'Google US English',
-      // Microsoft Edge neural voices (excellent quality)
-      'Microsoft Ryan Online (Natural)', 'Microsoft Guy Online (Natural)',
-      'Microsoft Ryan Online', 'Microsoft Guy Online',
-      'Microsoft Ryan', 'Microsoft George', 'Microsoft Mark',
-      // Android / ChromeOS
-      'English United Kingdom', 'English (United Kingdom)',
-    ];
-
-    this._initVoices();
-  }
-
-  _initVoices() {
-    const load = () => {
-      const voices = this.synth.getVoices();
-      if (voices.length === 0) return;
-
-      // Try premium voices first, in preference order
-      for (const pref of this.voicePreferences) {
-        const found = voices.find(v => v.name === pref || v.name.includes(pref));
-        if (found) {
-          this.selectedVoice = found;
-          break;
-        }
-      }
-
-      // Fallback: best English voice available
-      if (!this.selectedVoice) {
-        // Prefer en-GB for the JARVIS British persona
-        this.selectedVoice =
-          voices.find(v => v.lang === 'en-GB') ||
-          voices.find(v => v.lang.startsWith('en')) ||
-          voices[0];
-      }
-
-      this.voiceReady = true;
-      console.log('[JARVIS Voice] Selected:', this.selectedVoice?.name, this.selectedVoice?.lang);
+    // ElevenLabs voice IDs — British male voices ideal for JARVIS
+    this.voices = {
+      'George (British)':   'JBFqnCBsd6RMkjVDRZzb',
+      'Daniel (British)':   'onwK4e9ZLuTAKqWW03F9',
+      'Callum (Refined)':   'N2lVS1w4EtoT3dr4eOWO',
+      'Charlie (Casual)':   'IKne3meq5aSn9XLyUdCD',
+      'James (Authoritative)': 'ZQe5CZNOzWyzPSCn5a3c',
+      'Adam (Deep)':        'pNInz6obpgDQGcFmaJgB',
     };
 
+    // Default to George — refined British, perfect JARVIS voice
+    this.selectedVoiceId = 'JBFqnCBsd6RMkjVDRZzb';
+    this.selectedVoiceName = 'George (British)';
+
+    // Voice settings for naturalness
+    this.stability = 0.45;        // Lower = more expressive/natural
+    this.similarityBoost = 0.78;  // How close to original voice
+    this.style = 0.35;            // Style exaggeration
+    this.speakerBoost = true;
+
+    // Playback
+    this.rate = 1.0;
+
+    // Browser fallback
+    this.synth = window.speechSynthesis;
+    this.browserVoice = null;
+    this._initBrowserFallback();
+  }
+
+  _initBrowserFallback() {
+    const load = () => {
+      const voices = this.synth.getVoices();
+      this.browserVoice =
+        voices.find(v => v.name.includes('Samantha')) ||
+        voices.find(v => v.name.includes('Daniel')) ||
+        voices.find(v => v.lang.startsWith('en')) ||
+        voices[0];
+    };
     load();
-    if (this.synth.onvoiceschanged !== undefined) {
-      this.synth.onvoiceschanged = load;
+    if (this.synth.onvoiceschanged !== undefined) this.synth.onvoiceschanged = load;
+    setTimeout(load, 500);
+  }
+
+  getVoiceName() { return this.selectedVoiceName; }
+  getVoiceList() { return Object.keys(this.voices); }
+
+  setVoice(name) {
+    if (this.voices[name]) {
+      this.selectedVoiceId = this.voices[name];
+      this.selectedVoiceName = name;
     }
-    setTimeout(load, 300);
-    setTimeout(load, 1000);
-    setTimeout(load, 2500);
   }
 
-  getVoiceName() {
-    return this.selectedVoice ? this.selectedVoice.name : 'Loading...';
-  }
+  setRate(val) { this.rate = parseFloat(val); }
+  setPitch(val) { /* ElevenLabs handles pitch internally via stability */ }
 
-  // ═══════════════════════════════════════════════════════════════
-  // TEXT PROCESSING — Natural phrase extraction
-  // ═══════════════════════════════════════════════════════════════
+  setStability(val) { this.stability = parseFloat(val); }
+  setSimilarity(val) { this.similarityBoost = parseFloat(val); }
 
-  /**
-   * Clean markdown/formatting artifacts from AI response text
-   */
+  // ═══════════════════════════════════════════════
+  // TEXT PROCESSING
+  // ═══════════════════════════════════════════════
+
   _cleanText(text) {
     return text
       .replace(/```[\s\S]*?```/g, '. Code block provided. ')
@@ -105,211 +85,178 @@ class JarvisVoiceEngine {
       .replace(/\*\*([^*]+)\*\*/g, '$1')
       .replace(/\*([^*]+)\*/g, '$1')
       .replace(/#{1,6}\s*/g, '')
-      .replace(/[-*]\s+/g, '. ')             // bullet points → pause
-      .replace(/\d+\.\s+/g, '. ')            // numbered lists → pause
+      .replace(/[-*]\s+/g, '. ')
+      .replace(/\d+\.\s+/g, '. ')
       .replace(/\n{2,}/g, '. ')
       .replace(/\n/g, ', ')
       .replace(/\s{2,}/g, ' ')
-      .replace(/\.{2,}/g, '.')
-      .replace(/,{2,}/g, ',')
       .trim();
   }
 
   /**
-   * Split text into natural phrases at breath points.
-   * Humans breathe at: sentence ends, commas, semicolons, colons, 
-   * dashes, and after ~60-80 characters of continuous speech.
+   * Split into chunks that fit ElevenLabs' sweet spot (~300-500 chars).
+   * Larger chunks sound more natural as ElevenLabs models full context.
    */
-  _splitIntoPhrases(text) {
+  _splitForElevenLabs(text) {
     const clean = this._cleanText(text);
 
-    // First split on strong boundaries (sentence endings)
+    // If short enough, send as single chunk (most natural)
+    if (clean.length <= 500) return [clean];
+
+    // Split at sentence boundaries
     const sentences = clean.split(/(?<=[.!?])\s+/);
-    const phrases = [];
+    const chunks = [];
+    let buffer = '';
 
     for (const sentence of sentences) {
-      const trimmed = sentence.trim();
-      if (!trimmed) continue;
-
-      // Short sentences stay whole (natural single-breath delivery)
-      if (trimmed.length <= 80) {
-        phrases.push(trimmed);
-        continue;
+      const candidate = buffer ? buffer + ' ' + sentence : sentence;
+      if (candidate.length > 500 && buffer) {
+        chunks.push(buffer);
+        buffer = sentence;
+      } else {
+        buffer = candidate;
       }
+    }
+    if (buffer) chunks.push(buffer);
+    return chunks;
+  }
 
-      // Long sentences: split at weak boundaries (commas, semicolons, dashes)
-      const subParts = trimmed.split(/(?<=[:;,])\s+|(?<=\s—\s)/);
-      let buffer = '';
+  // ═══════════════════════════════════════════════
+  // ELEVENLABS TTS API
+  // ═══════════════════════════════════════════════
 
-      for (const part of subParts) {
-        const candidate = buffer ? buffer + ' ' + part : part;
-        
-        // Keep accumulating until we hit a natural breath length (40-90 chars)
-        if (candidate.length > 90 && buffer) {
-          phrases.push(buffer);
-          buffer = part;
-        } else {
-          buffer = candidate;
+  async _callElevenLabs(text) {
+    const url = `https://api.elevenlabs.io/v1/text-to-speech/${this.selectedVoiceId}`;
+
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'xi-api-key': this.apiKey,
+      },
+      body: JSON.stringify({
+        text: text,
+        model_id: 'eleven_multilingual_v2',
+        voice_settings: {
+          stability: this.stability,
+          similarity_boost: this.similarityBoost,
+          style: this.style,
+          use_speaker_boost: this.speakerBoost,
         }
-      }
-      if (buffer) phrases.push(buffer);
+      })
+    });
+
+    if (!response.ok) {
+      const err = await response.text().catch(() => '');
+      throw new Error(`ElevenLabs API error ${response.status}: ${err}`);
     }
 
-    return phrases.length ? phrases : [clean];
+    const audioBlob = await response.blob();
+    return URL.createObjectURL(audioBlob);
   }
 
-  // ═══════════════════════════════════════════════════════════════
-  // PROSODY ENGINE — Natural intonation & rhythm
-  // ═══════════════════════════════════════════════════════════════
+  // ═══════════════════════════════════════════════
+  // PLAYBACK
+  // ═══════════════════════════════════════════════
 
-  /**
-   * Analyze a phrase and return prosody parameters.
-   * This mimics how humans naturally modulate their voice.
-   */
-  _getProsody(phrase, index, total) {
-    const isFirst = index === 0;
-    const isLast = index === total - 1;
-    const isQuestion = /\?$/.test(phrase.trim());
-    const isExclamation = /!$/.test(phrase.trim());
-    const isListItem = /^(First|Second|Third|Next|Finally|Also|Additionally|Moreover)/i.test(phrase);
-    const isShort = phrase.length < 30;
-    const isLong = phrase.length > 100;
-    const hasComma = phrase.includes(',');
-
-    let rate = this.baseRate;
-    let pitch = this.basePitch;
-
-    // ── Rate modulation ──
-    if (isFirst) rate -= 0.04;          // Start deliberately, like gathering thoughts
-    if (isLast) rate -= 0.06;           // Slow down conclusively
-    if (isQuestion) rate -= 0.02;       // Questions are slightly slower
-    if (isShort) rate += 0.02;          // Short phrases flow faster
-    if (isLong) rate -= 0.02;           // Long phrases slow slightly
-    if (isListItem) rate -= 0.01;       // List items are measured
-
-    // Micro-variation for naturalness (±2%)
-    rate += (Math.random() - 0.5) * 0.04;
-
-    // ── Pitch modulation ──
-    if (isQuestion) pitch += 0.12;      // Rising intonation for questions
-    if (isExclamation) pitch += 0.06;   // Slight lift for emphasis
-    if (isLast && !isQuestion) pitch -= 0.06;  // Falling intonation at conclusion
-    if (isFirst) pitch += 0.02;         // Slightly higher start (engagement)
-    if (isListItem) pitch += 0.03;      // List items have slight lift
-
-    // Micro-variation (±1.5%)
-    pitch += (Math.random() - 0.5) * 0.03;
-
-    // Clamp to safe ranges
-    rate = Math.max(0.6, Math.min(1.25, rate));
-    pitch = Math.max(0.7, Math.min(1.3, pitch));
-
-    // ── Pause duration after this phrase (ms) ──
-    let pauseAfter = 0;
-    if (!isLast) {
-      if (isQuestion) pauseAfter = 400 + Math.random() * 200;      // Pause after questions
-      else if (/[.!]$/.test(phrase)) pauseAfter = 280 + Math.random() * 180;  // Sentence end
-      else if (/[;:]$/.test(phrase)) pauseAfter = 200 + Math.random() * 120;  // Mid-sentence break
-      else if (/,$/.test(phrase)) pauseAfter = 120 + Math.random() * 100;     // Comma pause
-      else pauseAfter = 150 + Math.random() * 100;   // Default breath
-    }
-
-    return { rate, pitch, pauseAfter };
-  }
-
-  // ═══════════════════════════════════════════════════════════════
-  // SPEECH DELIVERY
-  // ═══════════════════════════════════════════════════════════════
-
-  /**
-   * Speak text with natural human-like delivery
-   */
-  speak(text) {
+  async speak(text) {
     if (!document.getElementById('auto-speak')?.checked) return;
-    
+
     this.stop();
     this._cancelled = false;
     this.isSpeaking = true;
 
-    const phrases = this._splitIntoPhrases(text);
-    this.queue = [...phrases];
-
     if (this.onSpeakStart) this.onSpeakStart();
-    this._deliverPhrase(0);
+
+    try {
+      const chunks = this._splitForElevenLabs(text);
+      this._queue = [...chunks];
+      await this._playNextChunk(0);
+    } catch (err) {
+      console.warn('[JARVIS Voice] ElevenLabs failed, using browser fallback:', err.message);
+      this._browserFallback(text);
+    }
   }
 
-  _deliverPhrase(index) {
-    if (this._cancelled || index >= this.queue.length) {
+  async _playNextChunk(index) {
+    if (this._cancelled || index >= this._queue.length) {
       this._finish();
       return;
     }
 
-    const phrase = this.queue[index];
-    const prosody = this._getProsody(phrase, index, this.queue.length);
-    const utter = new SpeechSynthesisUtterance(phrase);
-
-    if (this.selectedVoice) utter.voice = this.selectedVoice;
-    utter.rate = prosody.rate;
-    utter.pitch = prosody.pitch;
-    utter.volume = 1;
-
-    utter.onend = () => {
+    try {
+      const audioUrl = await this._callElevenLabs(this._queue[index]);
       if (this._cancelled) return;
-      // Natural pause between phrases (breathing simulation)
-      if (prosody.pauseAfter > 0) {
-        setTimeout(() => this._deliverPhrase(index + 1), prosody.pauseAfter);
-      } else {
-        this._deliverPhrase(index + 1);
-      }
-    };
 
-    utter.onerror = (e) => {
-      console.warn('[JARVIS Voice] Chunk error:', e.error);
-      if (!this._cancelled) {
-        setTimeout(() => this._deliverPhrase(index + 1), 100);
-      }
-    };
+      await this._playAudio(audioUrl);
 
-    this.currentUtterance = utter;
+      // Small pause between chunks for breath
+      if (index < this._queue.length - 1 && !this._cancelled) {
+        await new Promise(r => setTimeout(r, 200));
+      }
+
+      await this._playNextChunk(index + 1);
+    } catch (err) {
+      console.warn('[JARVIS Voice] Chunk error:', err.message);
+      // Try next chunk on error
+      if (!this._cancelled) await this._playNextChunk(index + 1);
+    }
+  }
+
+  _playAudio(url) {
+    return new Promise((resolve, reject) => {
+      const audio = new Audio(url);
+      audio.playbackRate = this.rate;
+      this._currentAudio = audio;
+
+      audio.onended = () => {
+        URL.revokeObjectURL(url);
+        resolve();
+      };
+      audio.onerror = (e) => {
+        URL.revokeObjectURL(url);
+        reject(new Error('Audio playback error'));
+      };
+
+      audio.play().catch(reject);
+    });
+  }
+
+  // ═══════════════════════════════════════════════
+  // BROWSER FALLBACK (if ElevenLabs fails)
+  // ═══════════════════════════════════════════════
+
+  _browserFallback(text) {
+    const clean = this._cleanText(text).substring(0, 1000);
+    const utter = new SpeechSynthesisUtterance(clean);
+    if (this.browserVoice) utter.voice = this.browserVoice;
+    utter.rate = 0.92;
+    utter.pitch = 0.95;
+    utter.onend = () => this._finish();
+    utter.onerror = () => this._finish();
     this.synth.speak(utter);
-    this._ensureChromePlayback();
   }
 
-  /**
-   * Chrome has a bug where speechSynthesis freezes after ~15s.
-   * This workaround periodically nudges it to keep going.
-   */
-  _ensureChromePlayback() {
-    if (this._chromeTimer) clearInterval(this._chromeTimer);
-    this._chromeTimer = setInterval(() => {
-      if (!this.synth.speaking) {
-        clearInterval(this._chromeTimer);
-        return;
-      }
-      if (this.synth.speaking && !this.synth.paused) {
-        this.synth.pause();
-        this.synth.resume();
-      }
-    }, 12000);
-  }
+  // ═══════════════════════════════════════════════
+  // CONTROL
+  // ═══════════════════════════════════════════════
 
   _finish() {
     this.isSpeaking = false;
-    this.queue = [];
-    if (this._chromeTimer) clearInterval(this._chromeTimer);
+    this._queue = [];
     if (this.onSpeakEnd) this.onSpeakEnd();
   }
 
   stop() {
     this._cancelled = true;
     this.isSpeaking = false;
-    this.queue = [];
+    this._queue = [];
+    if (this._currentAudio) {
+      this._currentAudio.pause();
+      this._currentAudio = null;
+    }
     this.synth.cancel();
-    if (this._chromeTimer) clearInterval(this._chromeTimer);
   }
-
-  setRate(val) { this.baseRate = parseFloat(val); }
-  setPitch(val) { this.basePitch = parseFloat(val); }
 }
 
 window.JarvisVoiceEngine = JarvisVoiceEngine;

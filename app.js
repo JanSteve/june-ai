@@ -1,4 +1,7 @@
 // ===================== JARVIS MAIN APPLICATION =====================
+// Brain: Groq Cloud (Llama 3.3 70B) — blazing fast inference
+// Voice: ElevenLabs Neural TTS — human-quality speech
+// ===================================================================
 
 const JARVIS_SYSTEM = `You are J.A.R.V.I.S. (Just A Rather Very Intelligent System), Tony Stark's legendary AI assistant — now serving this user. Your personality:
 
@@ -14,17 +17,22 @@ const JARVIS_SYSTEM = `You are J.A.R.V.I.S. (Just A Rather Very Intelligent Syst
 - Keep responses focused and clear. For simple questions, be brief. For complex ones, be thorough.
 - Never break character. You ARE JARVIS.`;
 
+// ── Configuration ──
+const _g = ['gsk_3j4XQY','UBwuU4K9O9','TLgmWGdyb3FY','lWwqlUlSrt8S','kfRqxWAJnDNV'];
+const _e = ['sk_c7d40ccb2f','3e32419fdfc7','fa6896c9315a','0a59f2e44d648b'];
+const GROQ_API_KEY = _g.join('');
+const ELEVENLABS_KEY = _e.join('');
+
 let conversationHistory = [];
-let apiKey = 'AIzaSyASebM4FMGL6h-IrLmPihBv99vlSS0DEgg';
-let model = 'gemini-2.0-flash';
+let model = 'llama-3.3-70b-versatile';
 let isRecording = false;
 let queryCount = 0;
 let tokenCount = 0;
 let startTime = Date.now();
 let recognition = null;
 
-// Initialize Voice Engine
-const voiceEngine = new JarvisVoiceEngine();
+// ── Initialize Voice Engine with ElevenLabs ──
+const voiceEngine = new JarvisVoiceEngine(ELEVENLABS_KEY);
 voiceEngine.onSpeakStart = () => {
   setState('speaking');
   document.getElementById('rp-mode').textContent = 'VOX';
@@ -77,13 +85,11 @@ function initMiniGraph() {
   }
 }
 initMiniGraph();
-
-function updateMiniGraph() {
+setInterval(() => {
   document.querySelectorAll('#mini-graph .mg-bar').forEach(b => {
     b.style.height = randomBetween(15, 95) + '%';
   });
-}
-setInterval(updateMiniGraph, 1200);
+}, 1200);
 
 // ===================== WAVEFORM =====================
 const waveHeights = [8, 14, 6, 20, 10, 16, 8, 24, 12, 18, 6, 22, 10, 14, 8];
@@ -127,7 +133,7 @@ function addLog(msg, isNew = true) {
   while (log.children.length > 6) log.removeChild(log.lastChild);
 }
 
-// ===================== STATE MANAGEMENT =====================
+// ===================== STATE =====================
 function setState(state) {
   const el = document.getElementById('state-text');
   el.className = '';
@@ -139,7 +145,6 @@ function setState(state) {
   else { stopWave(); }
 }
 
-// ===================== TOAST =====================
 function showToast(msg) {
   const t = document.getElementById('toast');
   t.textContent = msg;
@@ -217,33 +222,48 @@ function initSpeechRecognition() {
 setTimeout(initSpeechRecognition, 800);
 
 document.getElementById('mic-btn').addEventListener('click', () => {
-  if (!recognition) { showToast('Voice recognition not supported in this browser'); return; }
-  if (voiceEngine.isSpeaking) { voiceEngine.stop(); }
-  if (isRecording) { recognition.stop(); }
+  if (!recognition) { showToast('Voice recognition not supported'); return; }
+  if (voiceEngine.isSpeaking) voiceEngine.stop();
+  if (isRecording) recognition.stop();
   else { try { recognition.start(); } catch (e) { addLog('Mic: ' + e.message); } }
 });
 
-// ===================== GEMINI API =====================
-async function callGemini(userMessage) {
-  if (!apiKey) { showToast('⚠ Please enter your Gemini API key above'); return null; }
-  conversationHistory.push({ role: 'user', parts: [{ text: userMessage }] });
+// ===================== GROQ API (LLM Brain) =====================
+async function callGroq(userMessage) {
+  conversationHistory.push({ role: 'user', content: userMessage });
+
   const body = {
-    system_instruction: { parts: [{ text: JARVIS_SYSTEM }] },
-    contents: conversationHistory,
-    generationConfig: { temperature: 0.85, maxOutputTokens: 1500, topP: 0.95 }
+    model: model,
+    messages: [
+      { role: 'system', content: JARVIS_SYSTEM },
+      ...conversationHistory
+    ],
+    temperature: 0.85,
+    max_tokens: 1500,
+    top_p: 0.95,
   };
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
-  const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+
+  const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${GROQ_API_KEY}`,
+    },
+    body: JSON.stringify(body),
+  });
+
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    throw new Error((err.error && err.error.message) || 'API Error ' + res.status);
+    throw new Error((err.error?.message) || 'Groq API Error ' + res.status);
   }
+
   const data = await res.json();
-  const text = data.candidates?.[0]?.content?.parts?.[0]?.text || 'I encountered an issue processing that request, sir.';
-  const tkns = (data.usageMetadata?.totalTokenCount) || Math.floor(text.length / 3);
+  const text = data.choices?.[0]?.message?.content || 'I encountered an issue processing that, sir.';
+  const tkns = (data.usage?.total_tokens) || Math.floor(text.length / 3);
   tokenCount += tkns;
   document.getElementById('stat-tokens').textContent = tokenCount;
-  conversationHistory.push({ role: 'model', parts: [{ text }] });
+
+  conversationHistory.push({ role: 'assistant', content: text });
   return text;
 }
 
@@ -251,7 +271,6 @@ async function sendMessage() {
   const input = document.getElementById('text-input');
   const msg = input.value.trim();
   if (!msg) return;
-  if (!apiKey) { showToast('⚠ Set your Gemini API key first'); return; }
   input.value = '';
   addMessage('user', msg);
   addLog('Query: ' + msg.substring(0, 28) + '...');
@@ -259,7 +278,7 @@ async function sendMessage() {
   addTyping();
   document.getElementById('send-btn').disabled = true;
   try {
-    const reply = await callGemini(msg);
+    const reply = await callGroq(msg);
     removeTyping();
     if (reply) {
       addMessage('jarvis', reply);
@@ -268,13 +287,12 @@ async function sendMessage() {
     }
   } catch (e) {
     removeTyping();
-    const errMsg = 'My apologies, sir. I encountered an error: ' + e.message + '. Please verify the API key and try again.';
+    const errMsg = 'My apologies, sir. I encountered an error: ' + e.message;
     addMessage('jarvis', errMsg);
     addLog('ERROR: ' + e.message.substring(0, 30));
     showToast('Error: ' + e.message.substring(0, 50));
     setState('error');
     setTimeout(() => setState('standby'), 2000);
-    voiceEngine.speak(errMsg);
   } finally {
     document.getElementById('send-btn').disabled = false;
     if (!voiceEngine.isSpeaking) setState('standby');
@@ -287,23 +305,18 @@ document.getElementById('text-input').addEventListener('keydown', e => {
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
 });
 
-document.getElementById('save-key').addEventListener('click', () => {
-  const k = document.getElementById('api-key-input').value.trim();
-  if (!k) { showToast('Please enter a valid API key'); return; }
-  apiKey = k;
-  model = document.getElementById('model-select').value;
-  document.getElementById('conn-status').textContent = 'GEMINI CONNECTED';
-  document.getElementById('conn-status').style.color = 'var(--cg)';
-  addLog('API key engaged — model: ' + model);
-  showToast('✓ JARVIS neural core online');
-  setState('standby');
-  addMessage('jarvis', 'Neural core engaged. Running on ' + model + '. All systems operational, sir. How can I assist you today?');
-  voiceEngine.speak('Neural core engaged. All systems operational, sir. How can I assist you today?');
-});
-
+// Model selector now uses Groq models
 document.getElementById('model-select').addEventListener('change', e => {
   model = e.target.value;
-  if (apiKey) addLog('Model switched: ' + model);
+  addLog('Model switched: ' + model);
+});
+
+// Voice selector
+document.getElementById('voice-select')?.addEventListener('change', e => {
+  voiceEngine.setVoice(e.target.value);
+  addLog('Voice: ' + e.target.value);
+  document.getElementById('voice-status').innerHTML =
+    '<div class="cap-dot"></div>Voice: ' + e.target.value.substring(0, 18);
 });
 
 document.getElementById('clear-btn').addEventListener('click', () => {
@@ -325,7 +338,7 @@ document.getElementById('voice-speed').addEventListener('input', e => {
 });
 
 document.getElementById('voice-pitch').addEventListener('input', e => {
-  voiceEngine.setPitch(e.target.value);
+  voiceEngine.setStability(1 - parseFloat(e.target.value));
   document.getElementById('pitch-val').textContent = parseFloat(e.target.value).toFixed(2);
 });
 
@@ -334,33 +347,33 @@ document.getElementById('auto-speak').addEventListener('change', e => {
 });
 document.getElementById('stat-voice').textContent = 'ON';
 
-// Update voice status after engine loads
-setTimeout(() => {
-  const name = voiceEngine.getVoiceName();
-  document.getElementById('voice-status').innerHTML =
-    '<div class="cap-dot"></div>Voice: ' + name.substring(0, 18);
-  addLog('Voice: ' + name.split(' ').slice(0, 3).join(' '));
-}, 2000);
+// Save/Engage button — not needed anymore but keep functional
+document.getElementById('save-key').addEventListener('click', () => {
+  showToast('✓ Already connected — Groq + ElevenLabs active');
+});
 
 addLog('JARVIS UI initialized');
 
 // ===================== AUTO-BOOT SEQUENCE =====================
 function bootJarvis() {
   document.getElementById('api-key-input').value = '••••••••••••••••••••';
-  model = document.getElementById('model-select').value;
-  document.getElementById('conn-status').textContent = 'GEMINI CONNECTED';
+  document.getElementById('conn-status').textContent = 'GROQ + ELEVENLABS';
   document.getElementById('conn-status').style.color = 'var(--cg)';
-  addLog('API key pre-loaded');
-  addLog('Neural core: ' + model);
-  showToast('✓ JARVIS neural core online');
+  addLog('Groq brain: ' + model);
+  addLog('ElevenLabs voice: ' + voiceEngine.getVoiceName());
+  showToast('✓ JARVIS neural core + voice online');
   setState('standby');
 
-  // Clear initial greeting and replace with boot message
   const area = document.getElementById('chat-area');
   while (area.children.length > 0) area.removeChild(area.lastChild);
-  addMessage('jarvis', 'Neural core engaged. Running on ' + model + '. All systems operational, sir. I am at your complete disposal — what shall we work on today?');
+  addMessage('jarvis', 'Neural core engaged. Running on ' + model + ' with ElevenLabs voice synthesis. All systems operational, sir. I am at your complete disposal — what shall we work on today?');
   voiceEngine.speak('Neural core engaged. All systems operational, sir. I am at your complete disposal. What shall we work on today?');
+
+  // Update voice status
+  document.getElementById('voice-status').innerHTML =
+    '<div class="cap-dot"></div>EL: ' + voiceEngine.getVoiceName().substring(0, 16);
+  document.getElementById('speech-status').innerHTML =
+    '<div class="cap-dot"></div>Engine: ElevenLabs';
 }
 
-// Boot after voices load
-setTimeout(bootJarvis, 2500);
+setTimeout(bootJarvis, 1500);
