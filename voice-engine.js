@@ -200,9 +200,13 @@ class JarvisVoiceEngine {
 
       await this._playNextChunk(index + 1);
     } catch (err) {
-      console.warn('[JARVIS Voice] Chunk error:', err.message);
-      // Try next chunk on error
-      if (!this._cancelled) await this._playNextChunk(index + 1);
+      console.warn('[JARVIS Voice] Chunk/Playback error:', err.message);
+      
+      // If audio playback was blocked by the browser, try to use the fallback for the REMAINING text
+      if (!this._cancelled) {
+         const remainingText = this._queue.slice(index).join(' ');
+         this._browserFallback(remainingText, index === 0 ? onPlaybackStart : null);
+      }
     }
   }
 

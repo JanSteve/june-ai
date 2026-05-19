@@ -314,11 +314,18 @@ async function sendMessage() {
     if (reply) {
       addLog('Response generated');
       
-      // Wait for audio to actually start before revealing text
-      voiceEngine.speak(reply, () => {
+      // Wait for audio to actually start before revealing text, with a 2-second failsafe
+      let revealed = false;
+      const revealText = () => {
+        if (revealed) return;
+        revealed = true;
         removeTyping();
         addMessage('jarvis', reply);
-      });
+      };
+      
+      voiceEngine.speak(reply, revealText);
+      setTimeout(revealText, 1500); // Failsafe if audio is blocked by browser
+
     } else {
       removeTyping();
     }
@@ -422,19 +429,12 @@ function bootJarvis() {
   document.getElementById('conn-status').style.color = 'var(--cg)';
   addLog('Groq brain: ' + model);
   addLog('ElevenLabs voice: ' + voiceEngine.getVoiceName());
-  showToast('✓ JARVIS neural core + voice online');
+  showToast('✓ JARVIS neural core online');
   setState('standby');
 
   const area = document.getElementById('chat-area');
-  while (area.children.length > 0) area.removeChild(area.lastChild);
-  addMessage('jarvis', 'Neural core engaged. Running on ' + model + ' with ElevenLabs voice synthesis. All systems operational, sir. I am at your complete disposal — what shall we work on today?');
-  voiceEngine.speak('Neural core engaged. All systems operational, sir. I am at your complete disposal. What shall we work on today?');
-
-  // Update voice status
-  document.getElementById('voice-status').innerHTML =
-    '<div class="cap-dot"></div>EL: ' + voiceEngine.getVoiceName().substring(0, 16);
-  document.getElementById('speech-status').innerHTML =
-    '<div class="cap-dot"></div>Engine: ElevenLabs';
+  // keep the welcome message, but don't speak it automatically to avoid mobile autoplay block
+  // The welcome message is already in index.html in the new UI! We don't need to add it here.
 }
 
 setTimeout(bootJarvis, 1500);
