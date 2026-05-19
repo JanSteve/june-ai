@@ -5,7 +5,7 @@
 
 A high-fidelity, minimalist AI interface inspired by modern platforms like Claude and Grok. Powered by ultra-fast LLM inference and hyper-realistic neural voice synthesis.
 
-[![Live Demo](https://img.shields.io/badge/Live%20Demo-Available-00d4ff?style=for-the-badge)](https://jansteve.github.io/june-ai/)
+[![Live Demo](https://img.shields.io/badge/Live%20Demo-Available-00d4ff?style=for-the-badge)](https://jansteve.github.io/jarvis-ai/)
 [![Developer](https://img.shields.io/badge/Designed%20&%20Developed%20By-R%20JAN%20STEVE%20DANIEL-ff6b00?style=for-the-badge)](#)
 
 </div>
@@ -57,7 +57,7 @@ While June A.I. is highly capable, it relies on third-party APIs which have spec
 *   **Browser Compatibility:** The voice recognition feature relies on the Web Speech API, which is natively supported on Google Chrome, Edge, and Safari.
 
 ## 💻 Getting Started
-1. Visit the [Live Dashboard](https://jansteve.github.io/june-ai/).
+1. Visit the [Live Dashboard](https://jansteve.github.io/jarvis-ai/).
 2. Ensure you grant **Microphone permissions** if you wish to speak to June.
 3. Use the **Settings gear** icon in the top right to adjust Voice Rate, Pitch, or toggle Auto-Speak.
 4. Start a conversation!
