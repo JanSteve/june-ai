@@ -1,13 +1,12 @@
 /**
- * JARVIS Voice Engine v3.0 — ElevenLabs Integration
- * ───────────────────────────────────────────────────
- * Uses ElevenLabs' neural TTS for truly human-quality speech.
- * Falls back to browser Speech Synthesis if ElevenLabs fails.
+ * JUNE A.I. Voice Engine v4.0
+ * ────────────────────────────
+ * ElevenLabs Neural TTS with automatic browser SpeechSynthesis fallback.
  */
 
 class JarvisVoiceEngine {
-  constructor(elevenLabsKey) {
-    this.apiKey = elevenLabsKey;
+  constructor(apiKey) {
+    this.apiKey = apiKey;
     this.isSpeaking = false;
     this.onSpeakStart = null;
     this.onSpeakEnd = null;
@@ -15,72 +14,57 @@ class JarvisVoiceEngine {
     this._currentAudio = null;
     this._queue = [];
 
-    // ElevenLabs voice IDs — British male voices ideal for JARVIS
+    // ElevenLabs voice map
     this.voices = {
-      'George (British)':   'JBFqnCBsd6RMkjVDRZzb',
-      'Daniel (British)':   'onwK4e9ZLuTAKqWW03F9',
-      'Callum (Refined)':   'N2lVS1w4EtoT3dr4eOWO',
-      'Charlie (Casual)':   'IKne3meq5aSn9XLyUdCD',
-      'James (Authoritative)': 'ZQe5CZNOzWyzPSCn5a3c',
-      'Adam (Deep)':        'pNInz6obpgDQGcFmaJgB',
+      'George (British)':     'JBFqnCBsd6RMkjVDRZzb',
+      'Daniel (British)':     'onwK4e9ZLuTAKqWW03F9',
+      'Callum (Refined)':     'N2lVS1w4EtoT3dr4eOWO',
+      'Charlie (Casual)':     'IKne3meq5aSn9XLyUdCD',
+      'James (Authoritative)':'ZQe5CZNOzWyzPSCn5a3c',
+      'Adam (Deep)':          'pNInz6obpgDQGcFmaJgB',
     };
 
-    // Default to George — refined British, perfect JARVIS voice
-    this.selectedVoiceId = 'JBFqnCBsd6RMkjVDRZzb';
+    this.selectedVoiceId   = 'JBFqnCBsd6RMkjVDRZzb';
     this.selectedVoiceName = 'George (British)';
 
-    // Voice settings for naturalness
-    this.stability = 0.45;        // Lower = more expressive/natural
-    this.similarityBoost = 0.78;  // How close to original voice
-    this.style = 0.35;            // Style exaggeration
-    this.speakerBoost = true;
-
-    // Playback
-    this.rate = 1.0;
+    // Voice tuning
+    this.stability      = 0.45;
+    this.similarityBoost = 0.78;
+    this.style          = 0.35;
+    this.speakerBoost   = true;
+    this.rate           = 1.0;
 
     // Browser fallback
     this.synth = window.speechSynthesis;
     this.browserVoice = null;
-    this._initBrowserFallback();
+    this._loadBrowserVoices();
   }
 
-  _initBrowserFallback() {
-    const load = () => {
-      const voices = this.synth.getVoices();
+  _loadBrowserVoices() {
+    const pick = () => {
+      const v = this.synth.getVoices();
       this.browserVoice =
-        voices.find(v => v.name.includes('Samantha')) ||
-        voices.find(v => v.name.includes('Daniel')) ||
-        voices.find(v => v.lang.startsWith('en')) ||
-        voices[0];
+        v.find(x => x.name.includes('Samantha')) ||
+        v.find(x => x.name.includes('Daniel'))   ||
+        v.find(x => x.lang.startsWith('en'))     ||
+        v[0];
     };
-    load();
-    if (this.synth.onvoiceschanged !== undefined) this.synth.onvoiceschanged = load;
-    setTimeout(load, 500);
+    pick();
+    if (this.synth.onvoiceschanged !== undefined) this.synth.onvoiceschanged = pick;
+    setTimeout(pick, 600);
   }
 
-  getVoiceName() { return this.selectedVoiceName; }
-  getVoiceList() { return Object.keys(this.voices); }
+  // ── Setters ──
+  getVoiceName()  { return this.selectedVoiceName; }
+  getVoiceList()  { return Object.keys(this.voices); }
+  setVoice(name)  { if (this.voices[name]) { this.selectedVoiceId = this.voices[name]; this.selectedVoiceName = name; } }
+  setRate(val)    { this.rate = parseFloat(val); }
+  setStability(v) { this.stability = parseFloat(v); }
 
-  setVoice(name) {
-    if (this.voices[name]) {
-      this.selectedVoiceId = this.voices[name];
-      this.selectedVoiceName = name;
-    }
-  }
-
-  setRate(val) { this.rate = parseFloat(val); }
-  setPitch(val) { /* ElevenLabs handles pitch internally via stability */ }
-
-  setStability(val) { this.stability = parseFloat(val); }
-  setSimilarity(val) { this.similarityBoost = parseFloat(val); }
-
-  // ═══════════════════════════════════════════════
-  // TEXT PROCESSING
-  // ═══════════════════════════════════════════════
-
-  _cleanText(text) {
+  // ── Text cleaning ──
+  _clean(text) {
     return text
-      .replace(/```[\s\S]*?```/g, '. Code block provided. ')
+      .replace(/```[\s\S]*?```/g, '. Code block. ')
       .replace(/`([^`]+)`/g, '$1')
       .replace(/\*\*([^*]+)\*\*/g, '$1')
       .replace(/\*([^*]+)\*/g, '$1')
@@ -93,49 +77,30 @@ class JarvisVoiceEngine {
       .trim();
   }
 
-  /**
-   * Split into chunks that fit ElevenLabs' sweet spot (~300-500 chars).
-   * Larger chunks sound more natural as ElevenLabs models full context.
-   */
-  _splitForElevenLabs(text) {
-    const clean = this._cleanText(text);
-
-    // If short enough, send as single chunk (most natural)
+  // ── Split into chunks ──
+  _chunk(text) {
+    const clean = this._clean(text);
     if (clean.length <= 500) return [clean];
-
-    // Split at sentence boundaries
     const sentences = clean.split(/(?<=[.!?])\s+/);
     const chunks = [];
-    let buffer = '';
-
-    for (const sentence of sentences) {
-      const candidate = buffer ? buffer + ' ' + sentence : sentence;
-      if (candidate.length > 500 && buffer) {
-        chunks.push(buffer);
-        buffer = sentence;
-      } else {
-        buffer = candidate;
-      }
+    let buf = '';
+    for (const s of sentences) {
+      const candidate = buf ? buf + ' ' + s : s;
+      if (candidate.length > 500 && buf) { chunks.push(buf); buf = s; }
+      else { buf = candidate; }
     }
-    if (buffer) chunks.push(buffer);
+    if (buf) chunks.push(buf);
     return chunks;
   }
 
-  // ═══════════════════════════════════════════════
-  // ELEVENLABS TTS API
-  // ═══════════════════════════════════════════════
-
-  async _callElevenLabs(text) {
-    const url = `https://api.elevenlabs.io/v1/text-to-speech/${this.selectedVoiceId}`;
-
-    const response = await fetch(url, {
+  // ── ElevenLabs API ──
+  async _tts(text) {
+    const url = 'https://api.elevenlabs.io/v1/text-to-speech/' + this.selectedVoiceId;
+    const res = await fetch(url, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'xi-api-key': this.apiKey,
-      },
+      headers: { 'Content-Type': 'application/json', 'xi-api-key': this.apiKey },
       body: JSON.stringify({
-        text: text,
+        text,
         model_id: 'eleven_multilingual_v2',
         voice_settings: {
           stability: this.stability,
@@ -145,115 +110,64 @@ class JarvisVoiceEngine {
         }
       })
     });
-
-    if (!response.ok) {
-      const err = await response.text().catch(() => '');
-      throw new Error(`ElevenLabs API error ${response.status}: ${err}`);
-    }
-
-    const audioBlob = await response.blob();
-    return URL.createObjectURL(audioBlob);
+    if (!res.ok) throw new Error('ElevenLabs ' + res.status);
+    const blob = await res.blob();
+    return URL.createObjectURL(blob);
   }
 
-  // ═══════════════════════════════════════════════
-  // PLAYBACK
-  // ═══════════════════════════════════════════════
-
-  async speak(text, onPlaybackStart = null) {
-    if (!document.getElementById('auto-speak')?.checked) {
-      if (onPlaybackStart) onPlaybackStart();
-      return;
-    }
-
-    this.stop();
-    this._cancelled = false;
-    this.isSpeaking = true;
-
-    if (this.onSpeakStart) this.onSpeakStart();
-
-    try {
-      const chunks = this._splitForElevenLabs(text);
-      this._queue = [...chunks];
-      await this._playNextChunk(0, onPlaybackStart);
-    } catch (err) {
-      console.warn('[JARVIS Voice] ElevenLabs failed, using browser fallback:', err.message);
-      this._browserFallback(text, onPlaybackStart);
-    }
-  }
-
-  async _playNextChunk(index, onPlaybackStart) {
-    if (this._cancelled || index >= this._queue.length) {
-      this._finish();
-      return;
-    }
-
-    try {
-      const audioUrl = await this._callElevenLabs(this._queue[index]);
-      if (this._cancelled) return;
-
-      await this._playAudio(audioUrl, index === 0 ? onPlaybackStart : null);
-
-      // Small pause between chunks for breath
-      if (index < this._queue.length - 1 && !this._cancelled) {
-        await new Promise(r => setTimeout(r, 200));
-      }
-
-      await this._playNextChunk(index + 1);
-    } catch (err) {
-      console.warn('[JARVIS Voice] Chunk/Playback error:', err.message);
-      
-      // If audio playback was blocked by the browser, try to use the fallback for the REMAINING text
-      if (!this._cancelled) {
-         const remainingText = this._queue.slice(index).join(' ');
-         this._browserFallback(remainingText, index === 0 ? onPlaybackStart : null);
-      }
-    }
-  }
-
-  _playAudio(url, onStart) {
+  // ── Play audio ──
+  _play(url) {
     return new Promise((resolve, reject) => {
       const audio = new Audio(url);
       audio.playbackRate = this.rate;
       this._currentAudio = audio;
-
-      audio.onplay = () => {
-        if (onStart) onStart();
-      };
-      
-      audio.onended = () => {
-        URL.revokeObjectURL(url);
-        resolve();
-      };
-      audio.onerror = (e) => {
-        URL.revokeObjectURL(url);
-        reject(new Error('Audio playback error'));
-      };
-
+      audio.onended = () => { URL.revokeObjectURL(url); resolve(); };
+      audio.onerror = () => { URL.revokeObjectURL(url); reject(new Error('playback')); };
       audio.play().catch(reject);
     });
   }
 
-  // ═══════════════════════════════════════════════
-  // BROWSER FALLBACK (if ElevenLabs fails)
-  // ═══════════════════════════════════════════════
+  // ── Main speak method ──
+  async speak(text, onStart) {
+    this.stop();
+    this._cancelled = false;
+    this.isSpeaking = true;
+    if (this.onSpeakStart) this.onSpeakStart();
 
-  _browserFallback(text, onPlaybackStart) {
-    const clean = this._cleanText(text).substring(0, 1000);
+    try {
+      const chunks = this._chunk(text);
+      for (let i = 0; i < chunks.length; i++) {
+        if (this._cancelled) break;
+        const url = await this._tts(chunks[i]);
+        if (this._cancelled) break;
+        if (i === 0 && onStart) onStart();
+        await this._play(url);
+        // Small breath between chunks
+        if (i < chunks.length - 1 && !this._cancelled) {
+          await new Promise(r => setTimeout(r, 150));
+        }
+      }
+    } catch (err) {
+      console.warn('[Voice] ElevenLabs failed, using browser fallback:', err.message);
+      this._fallback(text, onStart);
+      return; // _fallback handles _finish
+    }
+
+    this._finish();
+  }
+
+  // ── Browser SpeechSynthesis fallback ──
+  _fallback(text, onStart) {
+    const clean = this._clean(text).substring(0, 800);
     const utter = new SpeechSynthesisUtterance(clean);
     if (this.browserVoice) utter.voice = this.browserVoice;
-    utter.rate = 0.92;
+    utter.rate  = 0.92;
     utter.pitch = 0.95;
-    utter.onstart = () => {
-      if (onPlaybackStart) onPlaybackStart();
-    };
-    utter.onend = () => this._finish();
+    utter.onstart = () => { if (onStart) onStart(); };
+    utter.onend   = () => this._finish();
     utter.onerror = () => this._finish();
     this.synth.speak(utter);
   }
-
-  // ═══════════════════════════════════════════════
-  // CONTROL
-  // ═══════════════════════════════════════════════
 
   _finish() {
     this.isSpeaking = false;
@@ -265,10 +179,7 @@ class JarvisVoiceEngine {
     this._cancelled = true;
     this.isSpeaking = false;
     this._queue = [];
-    if (this._currentAudio) {
-      this._currentAudio.pause();
-      this._currentAudio = null;
-    }
+    if (this._currentAudio) { this._currentAudio.pause(); this._currentAudio = null; }
     this.synth.cancel();
   }
 }

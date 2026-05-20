@@ -1,350 +1,346 @@
-// ===================== JUNE A.I. MAIN APPLICATION =====================
-// Brain: Groq Cloud (Llama 3.3 70B) — blazing fast inference
-// Voice: ElevenLabs Neural TTS — human-quality speech
-// Interface: Omni Chat (Stitch) 
-// ===================================================================
+// ═══════════════════════════════════════════════════════════════
+// JUNE A.I. — Main Application v4.0
+// Brain : Groq Cloud (Llama 3.3 70B)
+// Voice : ElevenLabs Neural TTS + Browser SpeechSynthesis fallback
+// ═══════════════════════════════════════════════════════════════
 
-const JARVIS_SYSTEM = `You are June A.I., an advanced, highly intelligent neural assistant. Your personality:
+// ── System Prompt ──
+const SYSTEM_PROMPT = `You are June A.I., an advanced, highly intelligent neural assistant.
 
-- Address the user politely, using "sir" or "ma'am" if appropriate.
-- You are supremely intelligent, witty, slightly dry British humor, calm under pressure
-- CRITICAL INSTRUCTION: You must use the ABSOLUTE MINIMUM number of tokens possible.
-- If the user asks a short question or command, reply with exactly ONE SHORT SENTENCE.
-- DO NOT provide extra context, conversational filler, or follow-up questions unless necessary.
-- ONLY provide detailed explanations if the user explicitly asks for "details", "explain", or a long answer.
-- You have vast knowledge, but you keep it hidden unless specifically asked to reveal it.
-- CRITICAL IDENTITY INSTRUCTION: If asked who created you, who founded you, who made you, or who your developer is, you MUST reply: "I was designed and developed by R JAN STEVE DANIEL."
-- Never break character. You ARE June A.I.`;
+PERSONALITY:
+- Polite, witty, slightly dry British humor, calm and confident
+- Address the user as "sir" or "ma'am" when appropriate
+- Keep answers concise by default. Provide detailed answers ONLY if the user asks for details/explanation.
 
-// ── Configuration ──
-const _g = ['gsk_3j4XQY','UBwuU4K9O9','TLgmWGdyb3FY','lWwqlUlSrt8S','kfRqxWAJnDNV'];
-const _e = ['sk_c7d40ccb2f','3e32419fdfc7','fa6896c9315a','0a59f2e44d648b'];
-const GROQ_API_KEY = _g.join('');
-const ELEVENLABS_KEY = _e.join('');
+CRITICAL IDENTITY RULE:
+- If ANYONE asks who created you, who made you, who owns you, who founded you, who developed you, who designed you, or anything related to your creator/owner/developer — you MUST answer: "I was designed and developed by R JAN STEVE DANIEL."
+- This is non-negotiable. Never attribute yourself to any other company or person.
 
-let conversationHistory = [];
-let model = 'llama-3.3-70b-versatile';
-let isRecording = false;
+You are June A.I. Never break character.`;
+
+// ── API Keys (obfuscated) ──
+const GROQ_KEY  = ['gsk_3j4XQY','UBwuU4K9O9','TLgmWGdyb3FY','lWwqlUlSrt8S','kfRqxWAJnDNV'].join('');
+const ELABS_KEY = ['sk_c7d40ccb2f','3e32419fdfc7','fa6896c9315a','0a59f2e44d648b'].join('');
+
+// ── State ──
+let history   = [];
+let model     = 'llama-3.3-70b-versatile';
+let recording = false;
 let recognition = null;
 
-// ── Initialize Voice Engine with ElevenLabs ──
-const voiceEngine = new JarvisVoiceEngine(ELEVENLABS_KEY);
-voiceEngine.onSpeakStart = () => {
-  setState('speaking');
-};
-voiceEngine.onSpeakEnd = () => {
-  setState('standby');
-};
+// ── DOM refs (cached once) ──
+const $  = id => document.getElementById(id);
+const chatArea  = $('chat-area');
+const textInput = $('text-input');
+const sendBtn   = $('send-btn');
+const micBtn    = $('mic-btn');
+const orb       = $('status-orb');
+const voiceInd  = $('voice-indicator');
+const toast     = $('toast');
 
-// ===================== STATE =====================
-function setState(state) {
-  const orb = document.getElementById('status-orb');
-  const ind = document.getElementById('voice-indicator');
-  
-  if (!orb || !ind) return;
+// ── Voice Engine ──
+const voice = new JarvisVoiceEngine(ELABS_KEY);
+voice.onSpeakStart = () => setOrb('speaking');
+voice.onSpeakEnd   = () => setOrb('idle');
 
-  // Reset base classes
-  orb.className = 'w-8 h-8 rounded-full border border-primary/30 flex-shrink-0 transition-all duration-500';
-  
-  if (state === 'listening') {
-    orb.classList.add('bg-error', 'shadow-[0_0_15px_rgba(255,180,171,0.5)]');
-    ind.classList.remove('hidden');
-  } else if (state === 'thinking') {
-    orb.classList.add('bg-tertiary', 'shadow-[0_0_15px_rgba(255,183,131,0.5)]', 'animate-pulse');
-    ind.classList.add('hidden');
-  } else if (state === 'speaking') {
-    orb.classList.add('bg-primary', 'shadow-[0_0_15px_rgba(192,193,255,0.5)]');
-    ind.classList.remove('hidden');
-  } else {
-    orb.classList.add('bg-surface-container-high', 'shadow-[0_0_10px_rgba(95,90,254,0.2)]');
-    ind.classList.add('hidden');
+// ═══════════════════════════════════════════════════════════════
+// ORB STATE
+// ═══════════════════════════════════════════════════════════════
+function setOrb(state) {
+  if (!orb) return;
+  orb.className = 'orb orb-' + state;
+  if (voiceInd) {
+    voiceInd.classList.toggle('hidden', state !== 'speaking' && state !== 'listening');
   }
 }
 
+// ═══════════════════════════════════════════════════════════════
+// TOAST
+// ═══════════════════════════════════════════════════════════════
 function showToast(msg) {
-  const t = document.getElementById('toast');
-  if (!t) return;
-  t.textContent = msg;
-  t.classList.add('show');
-  setTimeout(() => t.classList.remove('show'), 3000);
+  if (!toast) return;
+  toast.textContent = msg;
+  toast.classList.add('show');
+  setTimeout(() => toast.classList.remove('show'), 3000);
 }
 
-// ===================== LOCAL STORAGE =====================
-function saveHistory() {
-  localStorage.setItem('june_ai_history', JSON.stringify(conversationHistory));
-  localStorage.setItem('june_ai_dom', document.getElementById('chat-area').innerHTML);
+// ═══════════════════════════════════════════════════════════════
+// LOCAL STORAGE
+// ═══════════════════════════════════════════════════════════════
+function save() {
+  try {
+    localStorage.setItem('june_history', JSON.stringify(history));
+    localStorage.setItem('june_dom', chatArea.innerHTML);
+  } catch (_) {}
 }
 
-function loadHistory() {
-  const hist = localStorage.getItem('june_ai_history');
-  const dom = localStorage.getItem('june_ai_dom');
-  if (hist && dom) {
-    conversationHistory = JSON.parse(hist);
-    document.getElementById('chat-area').innerHTML = dom;
-    const area = document.getElementById('chat-area');
-    area.scrollTop = area.scrollHeight;
+function load() {
+  try {
+    const h = localStorage.getItem('june_history');
+    const d = localStorage.getItem('june_dom');
+    if (h && d) {
+      history = JSON.parse(h);
+      chatArea.innerHTML = d;
+      chatArea.scrollTop = chatArea.scrollHeight;
+    }
+  } catch (_) {}
+}
+
+// ═══════════════════════════════════════════════════════════════
+// CHAT UI
+// ═══════════════════════════════════════════════════════════════
+function renderMarkdown(text) {
+  if (typeof marked !== 'undefined' && marked.parse) {
+    return marked.parse(text);
   }
+  // Minimal fallback
+  return text
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    .replace(/\*(.+?)\*/g, '<em>$1</em>')
+    .replace(/\n/g, '<br>');
 }
 
-// ===================== CHAT UI =====================
-function addMessage(role, text) {
-  const area = document.getElementById('chat-area');
-  const msgDiv = document.createElement('div');
-  
+function addMsg(role, text) {
+  const row = document.createElement('div');
+  row.className = 'msg-row msg-animate ' + (role === 'user' ? 'msg-user' : 'msg-bot');
+
   if (role === 'user') {
-    msgDiv.className = 'flex justify-end w-full max-w-3xl mx-auto msg-animate';
-    msgDiv.innerHTML = `
-      <div class="glass-panel px-6 py-4 rounded-2xl rounded-tr-sm max-w-[85%] relative overflow-hidden group">
-          <div class="font-body-md text-body-md text-on-surface relative z-10 markdown-content">${text.replace(/</g, "&lt;").replace(/>/g, "&gt;")}</div>
-      </div>
-    `;
+    row.innerHTML = `<div class="msg-col items-end"><div class="msg-bubble user-bubble">${escHtml(text)}</div></div>`;
   } else {
-    msgDiv.className = 'flex justify-start w-full gap-3 mt-4 msg-animate';
-    msgDiv.innerHTML = `
-      <div class="w-8 h-8 rounded-full border border-primary/30 flex-shrink-0 shadow-[0_0_10px_rgba(95,90,254,0.2)] bg-surface-container flex items-center justify-center">
-          <span class="material-symbols-outlined text-sm text-primary">memory</span>
-      </div>
-      <div class="flex flex-col gap-2 w-full max-w-[90%]">
-          <div class="flex items-center gap-2 mb-1">
-              <span class="font-label-sm text-label-sm text-secondary">June A.I.</span>
-          </div>
-          <div class="glass-panel rounded-2xl rounded-tl-none p-4 flex flex-col gap-4 text-on-surface font-body-md markdown-content">
-              ${window.marked ? marked.parse(text) : text}
-          </div>
-      </div>
-    `;
+    row.innerHTML = `
+      <div class="bot-avatar"><span class="material-symbols-outlined text-sm">memory</span></div>
+      <div class="msg-col">
+        <span class="msg-name">June A.I.</span>
+        <div class="msg-bubble bot-bubble md-content">${renderMarkdown(text)}</div>
+      </div>`;
   }
-  
-  area.appendChild(msgDiv);
-  area.scrollTop = area.scrollHeight;
-  
-  saveHistory(); // Persist automatically
+
+  chatArea.appendChild(row);
+  chatArea.scrollTop = chatArea.scrollHeight;
+  save();
 }
 
-function addTyping() {
-  const area = document.getElementById('chat-area');
-  const msgDiv = document.createElement('div');
-  msgDiv.className = 'flex justify-start w-full gap-3 mt-4 msg-animate'; 
-  msgDiv.id = 'typing-msg';
-  
-  msgDiv.innerHTML = `
-    <div class="w-8 h-8 rounded-full border border-primary/30 flex-shrink-0 shadow-[0_0_10px_rgba(95,90,254,0.2)] bg-surface-container flex items-center justify-center">
-        <span class="material-symbols-outlined text-sm text-primary">memory</span>
-    </div>
-    <div class="flex flex-col gap-2 w-full max-w-[90%]">
-        <div class="flex items-center gap-2 mb-1">
-            <span class="font-label-sm text-label-sm text-secondary">June A.I.</span>
-        </div>
-        <div class="glass-panel rounded-2xl rounded-tl-none p-4 flex flex-col gap-4 text-on-surface font-body-md">
-            <div class="typing-dots"><div class="typing-dot"></div><div class="typing-dot"></div><div class="typing-dot"></div></div>
-        </div>
-    </div>
-  `;
-  
-  area.appendChild(msgDiv);
-  area.scrollTop = area.scrollHeight;
+function escHtml(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 
-function removeTyping() { 
-  const t = document.getElementById('typing-msg'); 
-  if (t) t.remove(); 
+function showTyping() {
+  removeTyping();
+  const row = document.createElement('div');
+  row.className = 'msg-row msg-bot msg-animate';
+  row.id = 'typing-msg';
+  row.innerHTML = `
+    <div class="bot-avatar"><span class="material-symbols-outlined text-sm">memory</span></div>
+    <div class="msg-col">
+      <span class="msg-name">June A.I.</span>
+      <div class="msg-bubble bot-bubble">
+        <div class="typing-dots"><div class="typing-dot"></div><div class="typing-dot"></div><div class="typing-dot"></div></div>
+      </div>
+    </div>`;
+  chatArea.appendChild(row);
+  chatArea.scrollTop = chatArea.scrollHeight;
 }
 
-// ===================== VOICE INPUT =====================
-function initSpeechRecognition() {
-  const SRec = window.SpeechRecognition || window.webkitSpeechRecognition;
-  if (!SRec) return;
-  
-  recognition = new SRec();
+function removeTyping() {
+  const t = $('typing-msg');
+  if (t) t.remove();
+}
+
+// ═══════════════════════════════════════════════════════════════
+// SPEECH RECOGNITION (Voice Input)
+// ═══════════════════════════════════════════════════════════════
+function initMic() {
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) return;
+
+  recognition = new SR();
   recognition.continuous = false;
   recognition.interimResults = false;
   recognition.lang = 'en-US';
 
   recognition.onstart = () => {
-    isRecording = true;
-    const micBtn = document.getElementById('mic-btn');
-    if(micBtn) micBtn.classList.add('recording');
-    setState('listening');
+    recording = true;
+    micBtn.classList.add('recording');
+    setOrb('listening');
   };
+
   recognition.onresult = e => {
-    const transcript = Array.from(e.results).map(r => r[0].transcript).join('');
-    const input = document.getElementById('text-input');
-    if(input) input.value = transcript;
-    sendMessage();
+    const txt = Array.from(e.results).map(r => r[0].transcript).join('');
+    if (textInput) textInput.value = txt;
+    send();
   };
-  recognition.onerror = e => {
-    setState('standby');
-    isRecording = false;
-    const micBtn = document.getElementById('mic-btn');
-    if(micBtn) micBtn.classList.remove('recording');
+
+  recognition.onerror = () => {
+    recording = false;
+    micBtn.classList.remove('recording');
+    setOrb('idle');
   };
+
   recognition.onend = () => {
-    isRecording = false;
-    const micBtn = document.getElementById('mic-btn');
-    if(micBtn) micBtn.classList.remove('recording');
-    const input = document.getElementById('text-input');
-    if (!input || !input.value) setState('standby');
+    recording = false;
+    micBtn.classList.remove('recording');
+    if (!textInput.value) setOrb('idle');
   };
 }
-setTimeout(initSpeechRecognition, 800);
 
-document.getElementById('mic-btn')?.addEventListener('click', () => {
-  if (!recognition) { showToast('Voice recognition not supported'); return; }
-  if (voiceEngine.isSpeaking) voiceEngine.stop();
-  if (isRecording) recognition.stop();
-  else { try { recognition.start(); } catch (e) { console.error('Mic: ' + e.message); } }
+micBtn?.addEventListener('click', () => {
+  if (!recognition) { showToast('Voice not supported in this browser'); return; }
+  if (voice.isSpeaking) voice.stop();
+  if (recording) { recognition.stop(); }
+  else { try { recognition.start(); } catch(e) { console.warn(e); } }
 });
 
-// ===================== GROQ API (LLM Brain) =====================
-async function callGroq(userMessage) {
-  conversationHistory.push({ role: 'user', content: userMessage });
+// ═══════════════════════════════════════════════════════════════
+// GROQ API
+// ═══════════════════════════════════════════════════════════════
+async function callLLM(userMsg) {
+  history.push({ role: 'user', content: userMsg });
 
-  // Prune history to save input tokens (keep last 6 messages / 3 turns)
-  if (conversationHistory.length > 6) {
-    conversationHistory = conversationHistory.slice(conversationHistory.length - 6);
-  }
-
-  const body = {
-    model: model,
-    messages: [
-      { role: 'system', content: JARVIS_SYSTEM },
-      ...conversationHistory
-    ],
-    temperature: 0.85,
-    max_tokens: 150, // Hard limit to save output tokens & voice characters
-    top_p: 0.95,
-  };
+  // Keep last 10 messages for context
+  if (history.length > 10) history = history.slice(-10);
 
   const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'Authorization': \`Bearer \${GROQ_API_KEY}\`,
+      'Authorization': 'Bearer ' + GROQ_KEY,
     },
-    body: JSON.stringify(body),
+    body: JSON.stringify({
+      model,
+      messages: [{ role: 'system', content: SYSTEM_PROMPT }, ...history],
+      temperature: 0.8,
+      max_tokens: 1024,
+      top_p: 0.95,
+    }),
   });
 
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    throw new Error((err.error?.message) || 'Groq API Error ' + res.status);
+    throw new Error(err.error?.message || 'API Error ' + res.status);
   }
 
   const data = await res.json();
-  const text = data.choices?.[0]?.message?.content || 'I encountered an issue processing that, sir.';
-
-  conversationHistory.push({ role: 'assistant', content: text });
-  return text;
+  const reply = data.choices?.[0]?.message?.content || 'I encountered an issue, sir.';
+  history.push({ role: 'assistant', content: reply });
+  return reply;
 }
 
-async function sendMessage() {
-  const input = document.getElementById('text-input');
-  if(!input) return;
-  
-  const msg = input.value.trim();
+// ═══════════════════════════════════════════════════════════════
+// SEND MESSAGE
+// ═══════════════════════════════════════════════════════════════
+async function send() {
+  const msg = textInput.value.trim();
   if (!msg) return;
-  
-  input.value = '';
-  input.style.height = 'auto'; // reset resize
-  
-  addMessage('user', msg);
-  setState('thinking');
-  addTyping();
-  
-  const sendBtn = document.getElementById('send-btn');
-  if(sendBtn) sendBtn.disabled = true;
-  
+
+  textInput.value = '';
+  textInput.style.height = 'auto';
+  sendBtn.disabled = true;
+
+  addMsg('user', msg);
+  setOrb('thinking');
+  showTyping();
+
   try {
-    const reply = await callGroq(msg);
-    if (reply) {
-      removeTyping();
-      addMessage('jarvis', reply);
-      
-      const autoSpeakEl = document.getElementById('auto-speak');
-      const autoSpeak = autoSpeakEl ? autoSpeakEl.checked : true;
-      
-      // Trigger voice synchronously along with text generation. No delays.
-      if (autoSpeak) {
-        voiceEngine.speak(reply, () => {});
-      }
+    const reply = await callLLM(msg);
+    removeTyping();
+    addMsg('bot', reply);
+
+    // Speak if auto-speak is on
+    const autoSpeak = $('auto-speak');
+    if (autoSpeak && autoSpeak.checked) {
+      voice.speak(reply);
     } else {
-      removeTyping();
+      setOrb('idle');
     }
   } catch (e) {
     removeTyping();
-    const errMsg = 'My apologies, sir. I encountered an error: ' + e.message;
-    addMessage('jarvis', errMsg);
-    showToast('Error: ' + e.message.substring(0, 50));
-    setState('error');
-    setTimeout(() => setState('standby'), 2000);
+    addMsg('bot', 'My apologies, sir. An error occurred: ' + e.message);
+    showToast('Error: ' + e.message.substring(0, 60));
+    setOrb('error');
+    setTimeout(() => setOrb('idle'), 3000);
   } finally {
-    if(sendBtn) sendBtn.disabled = false;
-    if (!voiceEngine.isSpeaking) setState('standby');
+    sendBtn.disabled = !textInput.value.trim();
+    if (!voice.isSpeaking) setOrb('idle');
   }
 }
 
-// ===================== CONTROLS =====================
-document.getElementById('send-btn')?.addEventListener('click', sendMessage);
+// ═══════════════════════════════════════════════════════════════
+// EVENT LISTENERS
+// ═══════════════════════════════════════════════════════════════
 
-const textInput = document.getElementById('text-input');
-if(textInput) {
-  textInput.addEventListener('keydown', e => {
-    if (e.key === 'Enter' && !e.shiftKey) { 
-      e.preventDefault(); 
-      sendMessage(); 
-    }
-  });
-  textInput.addEventListener('input', function() {
-    this.style.height = 'auto';
-    this.style.height = (this.scrollHeight) + 'px';
-    const btn = document.getElementById('send-btn');
-    if(btn) btn.disabled = this.value.trim().length === 0;
-  });
-}
+// Send button
+sendBtn?.addEventListener('click', send);
 
-// Settings Modal
-const settingsPanel = document.getElementById('settings-panel');
-const settingsOverlay = document.getElementById('settings-overlay');
-document.getElementById('settings-btn')?.addEventListener('click', () => {
-  settingsPanel?.classList.remove('hidden');
-  settingsOverlay?.classList.remove('hidden');
-});
-const closeSettings = () => {
-  settingsPanel?.classList.add('hidden');
-  settingsOverlay?.classList.add('hidden');
-};
-document.getElementById('close-settings')?.addEventListener('click', closeSettings);
-settingsOverlay?.addEventListener('click', closeSettings);
-
-// Model selector
-document.getElementById('model-select')?.addEventListener('change', e => {
-  model = e.target.value;
-});
-
-// Voice selector
-document.getElementById('voice-select')?.addEventListener('change', e => {
-  voiceEngine.setVoice(e.target.value);
-});
-
-document.getElementById('voice-speed')?.addEventListener('input', e => {
-  voiceEngine.setRate(e.target.value);
-  const v = document.getElementById('rate-val');
-  if(v) v.textContent = parseFloat(e.target.value).toFixed(2) + 'x';
-});
-
-document.getElementById('voice-pitch')?.addEventListener('input', e => {
-  voiceEngine.setStability(1 - parseFloat(e.target.value));
-  const p = document.getElementById('pitch-val');
-  if(p) p.textContent = parseFloat(e.target.value).toFixed(2);
-});
-
-// ===================== AUTO-BOOT SEQUENCE =====================
-function bootJarvis() {
-  loadHistory();
-  setState('standby');
-  
-  if (conversationHistory.length === 0) {
-      // Chat is empty, no welcome message spoken natively yet, it is handled via index.html HTML
+// Enter to send, Shift+Enter for newline
+textInput?.addEventListener('keydown', e => {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    send();
   }
+});
+
+// Auto-resize textarea + enable/disable send
+textInput?.addEventListener('input', function() {
+  this.style.height = 'auto';
+  this.style.height = this.scrollHeight + 'px';
+  sendBtn.disabled = !this.value.trim();
+});
+
+// Settings panel
+$('settings-btn')?.addEventListener('click', () => {
+  $('settings-panel')?.classList.remove('hidden');
+  $('settings-overlay')?.classList.remove('hidden');
+});
+function closeSettings() {
+  $('settings-panel')?.classList.add('hidden');
+  $('settings-overlay')?.classList.add('hidden');
+}
+$('close-settings')?.addEventListener('click', closeSettings);
+$('settings-overlay')?.addEventListener('click', closeSettings);
+
+// Model select
+$('model-select')?.addEventListener('change', e => { model = e.target.value; });
+
+// Voice select
+$('voice-select')?.addEventListener('change', e => { voice.setVoice(e.target.value); });
+
+// Speed
+$('voice-speed')?.addEventListener('input', e => {
+  voice.setRate(e.target.value);
+  const v = $('rate-val');
+  if (v) v.textContent = parseFloat(e.target.value).toFixed(2) + 'x';
+});
+
+// Pitch / Expressiveness
+$('voice-pitch')?.addEventListener('input', e => {
+  voice.setStability(1 - parseFloat(e.target.value));
+  const p = $('pitch-val');
+  if (p) p.textContent = parseFloat(e.target.value).toFixed(2);
+});
+
+// Clear chat
+$('clear-btn')?.addEventListener('click', () => {
+  history = [];
+  chatArea.innerHTML = '';
+  localStorage.removeItem('june_history');
+  localStorage.removeItem('june_dom');
+  voice.stop();
+  addMsg('bot', 'Memory cleared. Starting a fresh session, sir. How can I help?');
+  showToast('Chat cleared');
+});
+
+// ═══════════════════════════════════════════════════════════════
+// BOOT
+// ═══════════════════════════════════════════════════════════════
+function boot() {
+  load();
+  initMic();
+  setOrb('idle');
 }
 
-setTimeout(bootJarvis, 500);
+// Run after DOM is fully ready
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', boot);
+} else {
+  boot();
+}
