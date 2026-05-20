@@ -1,6 +1,7 @@
-// ===================== JARVIS MAIN APPLICATION =====================
+// ===================== JUNE A.I. MAIN APPLICATION =====================
 // Brain: Groq Cloud (Llama 3.3 70B) — blazing fast inference
 // Voice: ElevenLabs Neural TTS — human-quality speech
+// Interface: Omni Chat (Stitch) 
 // ===================================================================
 
 const JARVIS_SYSTEM = `You are June A.I., an advanced, highly intelligent neural assistant. Your personality:
@@ -24,114 +25,136 @@ const ELEVENLABS_KEY = _e.join('');
 let conversationHistory = [];
 let model = 'llama-3.3-70b-versatile';
 let isRecording = false;
-let queryCount = 0;
-let tokenCount = 0;
-let startTime = Date.now();
 let recognition = null;
 
 // ── Initialize Voice Engine with ElevenLabs ──
 const voiceEngine = new JarvisVoiceEngine(ELEVENLABS_KEY);
 voiceEngine.onSpeakStart = () => {
   setState('speaking');
-  document.getElementById('rp-mode').textContent = 'VOX';
 };
 voiceEngine.onSpeakEnd = () => {
   setState('standby');
-  document.getElementById('rp-mode').textContent = 'TXT';
 };
-
-
-
-// ===================== ACTIVITY LOG =====================
-function addLog(msg, isNew = true) {
-  const log = document.getElementById('activity-log');
-  const div = document.createElement('div');
-  div.className = 'log-line' + (isNew ? ' new' : '');
-  const ts = new Date().toLocaleTimeString('en', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-  div.textContent = '[' + ts + '] ' + msg;
-  log.insertBefore(div, log.firstChild);
-  while (log.children.length > 6) log.removeChild(log.lastChild);
-}
 
 // ===================== STATE =====================
 function setState(state) {
   const orb = document.getElementById('status-orb');
   const ind = document.getElementById('voice-indicator');
   
+  if (!orb || !ind) return;
+
+  // Reset base classes
+  orb.className = 'w-8 h-8 rounded-full border border-primary/30 flex-shrink-0 transition-all duration-500';
+  
   if (state === 'listening') {
-    orb.style.background = '#ef4444';
-    orb.style.boxShadow = '0 0 12px #ef4444';
+    orb.classList.add('bg-error', 'shadow-[0_0_15px_rgba(255,180,171,0.5)]');
     ind.classList.remove('hidden');
   } else if (state === 'thinking') {
-    orb.style.background = '#eab308';
-    orb.style.boxShadow = '0 0 12px #eab308';
+    orb.classList.add('bg-tertiary', 'shadow-[0_0_15px_rgba(255,183,131,0.5)]', 'animate-pulse');
     ind.classList.add('hidden');
   } else if (state === 'speaking') {
-    orb.style.background = 'var(--accent)';
-    orb.style.boxShadow = '0 0 12px var(--accent)';
+    orb.classList.add('bg-primary', 'shadow-[0_0_15px_rgba(192,193,255,0.5)]');
     ind.classList.remove('hidden');
   } else {
-    orb.style.background = 'var(--text-muted)';
-    orb.style.boxShadow = 'none';
+    orb.classList.add('bg-surface-container-high', 'shadow-[0_0_10px_rgba(95,90,254,0.2)]');
     ind.classList.add('hidden');
   }
 }
 
 function showToast(msg) {
   const t = document.getElementById('toast');
+  if (!t) return;
   t.textContent = msg;
   t.classList.add('show');
   setTimeout(() => t.classList.remove('show'), 3000);
 }
 
+// ===================== LOCAL STORAGE =====================
+function saveHistory() {
+  localStorage.setItem('june_ai_history', JSON.stringify(conversationHistory));
+  localStorage.setItem('june_ai_dom', document.getElementById('chat-area').innerHTML);
+}
+
+function loadHistory() {
+  const hist = localStorage.getItem('june_ai_history');
+  const dom = localStorage.getItem('june_ai_dom');
+  if (hist && dom) {
+    conversationHistory = JSON.parse(hist);
+    document.getElementById('chat-area').innerHTML = dom;
+    const area = document.getElementById('chat-area');
+    area.scrollTop = area.scrollHeight;
+  }
+}
+
 // ===================== CHAT UI =====================
 function addMessage(role, text) {
   const area = document.getElementById('chat-area');
-  const msg = document.createElement('div'); msg.className = 'msg ' + role;
+  const msgDiv = document.createElement('div');
   
-  const avatar = document.createElement('div'); avatar.className = 'avatar';
-  if (role === 'jarvis') {
-    avatar.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/></svg>';
-  }
-  
-  const content = document.createElement('div'); content.className = 'msg-content';
-  content.textContent = text;
-  
-  msg.appendChild(avatar); 
-  msg.appendChild(content); 
-  area.appendChild(msg);
-  
-  const main = document.getElementById('main-container');
-  main.scrollTop = main.scrollHeight;
   if (role === 'user') {
-    queryCount++;
+    msgDiv.className = 'flex justify-end w-full max-w-3xl mx-auto msg-animate';
+    msgDiv.innerHTML = `
+      <div class="glass-panel px-6 py-4 rounded-2xl rounded-tr-sm max-w-[85%] relative overflow-hidden group">
+          <div class="font-body-md text-body-md text-on-surface relative z-10 markdown-content">${text.replace(/</g, "&lt;").replace(/>/g, "&gt;")}</div>
+      </div>
+    `;
+  } else {
+    msgDiv.className = 'flex justify-start w-full gap-3 mt-4 msg-animate';
+    msgDiv.innerHTML = `
+      <div class="w-8 h-8 rounded-full border border-primary/30 flex-shrink-0 shadow-[0_0_10px_rgba(95,90,254,0.2)] bg-surface-container flex items-center justify-center">
+          <span class="material-symbols-outlined text-sm text-primary">memory</span>
+      </div>
+      <div class="flex flex-col gap-2 w-full max-w-[90%]">
+          <div class="flex items-center gap-2 mb-1">
+              <span class="font-label-sm text-label-sm text-secondary">June A.I.</span>
+          </div>
+          <div class="glass-panel rounded-2xl rounded-tl-none p-4 flex flex-col gap-4 text-on-surface font-body-md markdown-content">
+              ${window.marked ? marked.parse(text) : text}
+          </div>
+      </div>
+    `;
   }
-  return bubble;
+  
+  area.appendChild(msgDiv);
+  area.scrollTop = area.scrollHeight;
+  
+  saveHistory(); // Persist automatically
 }
 
 function addTyping() {
   const area = document.getElementById('chat-area');
-  const msg = document.createElement('div'); msg.className = 'msg jarvis'; msg.id = 'typing-msg';
+  const msgDiv = document.createElement('div');
+  msgDiv.className = 'flex justify-start w-full gap-3 mt-4 msg-animate'; 
+  msgDiv.id = 'typing-msg';
   
-  const avatar = document.createElement('div'); avatar.className = 'avatar';
-  avatar.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/></svg>';
+  msgDiv.innerHTML = `
+    <div class="w-8 h-8 rounded-full border border-primary/30 flex-shrink-0 shadow-[0_0_10px_rgba(95,90,254,0.2)] bg-surface-container flex items-center justify-center">
+        <span class="material-symbols-outlined text-sm text-primary">memory</span>
+    </div>
+    <div class="flex flex-col gap-2 w-full max-w-[90%]">
+        <div class="flex items-center gap-2 mb-1">
+            <span class="font-label-sm text-label-sm text-secondary">June A.I.</span>
+        </div>
+        <div class="glass-panel rounded-2xl rounded-tl-none p-4 flex flex-col gap-4 text-on-surface font-body-md">
+            <div class="typing-dots"><div class="typing-dot"></div><div class="typing-dot"></div><div class="typing-dot"></div></div>
+        </div>
+    </div>
+  `;
   
-  const content = document.createElement('div'); content.className = 'msg-content';
-  content.innerHTML = '<div class="typing-indicator"><div class="typing-dots"><div class="typing-dot"></div><div class="typing-dot"></div><div class="typing-dot"></div></div></div>';
-  
-  msg.appendChild(avatar); msg.appendChild(content); area.appendChild(msg);
-  const main = document.getElementById('main-container');
-  main.scrollTop = main.scrollHeight;
+  area.appendChild(msgDiv);
+  area.scrollTop = area.scrollHeight;
 }
-function removeTyping() { const t = document.getElementById('typing-msg'); if (t) t.remove(); }
+
+function removeTyping() { 
+  const t = document.getElementById('typing-msg'); 
+  if (t) t.remove(); 
+}
 
 // ===================== VOICE INPUT =====================
 function initSpeechRecognition() {
   const SRec = window.SpeechRecognition || window.webkitSpeechRecognition;
-  if (!SRec) {
-    document.getElementById('voice-status').innerHTML = '<div class="cap-dot" style="background:var(--cr)"></div>Mic: Not supported';
-    return;
-  }
+  if (!SRec) return;
+  
   recognition = new SRec();
   recognition.continuous = false;
   recognition.interimResults = false;
@@ -139,37 +162,37 @@ function initSpeechRecognition() {
 
   recognition.onstart = () => {
     isRecording = true;
-    document.getElementById('mic-btn').classList.add('recording');
+    const micBtn = document.getElementById('mic-btn');
+    if(micBtn) micBtn.classList.add('recording');
     setState('listening');
-    addLog('Voice input activated');
   };
   recognition.onresult = e => {
     const transcript = Array.from(e.results).map(r => r[0].transcript).join('');
-    document.getElementById('text-input').value = transcript;
-    document.getElementById('rp-mode').textContent = 'MIC';
-    addLog('Transcript: ' + transcript.substring(0, 30));
+    const input = document.getElementById('text-input');
+    if(input) input.value = transcript;
     sendMessage();
   };
   recognition.onerror = e => {
-    addLog('Mic error: ' + e.error);
     setState('standby');
     isRecording = false;
-    document.getElementById('mic-btn').classList.remove('recording');
+    const micBtn = document.getElementById('mic-btn');
+    if(micBtn) micBtn.classList.remove('recording');
   };
   recognition.onend = () => {
     isRecording = false;
-    document.getElementById('mic-btn').classList.remove('recording');
-    if (!document.getElementById('text-input').value) setState('standby');
+    const micBtn = document.getElementById('mic-btn');
+    if(micBtn) micBtn.classList.remove('recording');
+    const input = document.getElementById('text-input');
+    if (!input || !input.value) setState('standby');
   };
-  document.getElementById('voice-status').innerHTML = '<div class="cap-dot"></div>Mic: Ready';
 }
 setTimeout(initSpeechRecognition, 800);
 
-document.getElementById('mic-btn').addEventListener('click', () => {
+document.getElementById('mic-btn')?.addEventListener('click', () => {
   if (!recognition) { showToast('Voice recognition not supported'); return; }
   if (voiceEngine.isSpeaking) voiceEngine.stop();
   if (isRecording) recognition.stop();
-  else { try { recognition.start(); } catch (e) { addLog('Mic: ' + e.message); } }
+  else { try { recognition.start(); } catch (e) { console.error('Mic: ' + e.message); } }
 });
 
 // ===================== GROQ API (LLM Brain) =====================
@@ -196,7 +219,7 @@ async function callGroq(userMessage) {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'Authorization': `Bearer ${GROQ_API_KEY}`,
+      'Authorization': \`Bearer \${GROQ_API_KEY}\`,
     },
     body: JSON.stringify(body),
   });
@@ -208,8 +231,6 @@ async function callGroq(userMessage) {
 
   const data = await res.json();
   const text = data.choices?.[0]?.message?.content || 'I encountered an issue processing that, sir.';
-  const tkns = (data.usage?.total_tokens) || Math.floor(text.length / 3);
-  tokenCount += tkns;
 
   conversationHistory.push({ role: 'assistant', content: text });
   return text;
@@ -217,6 +238,8 @@ async function callGroq(userMessage) {
 
 async function sendMessage() {
   const input = document.getElementById('text-input');
+  if(!input) return;
+  
   const msg = input.value.trim();
   if (!msg) return;
   
@@ -224,27 +247,25 @@ async function sendMessage() {
   input.style.height = 'auto'; // reset resize
   
   addMessage('user', msg);
-  addLog('Query: ' + msg.substring(0, 28) + '...');
   setState('thinking');
   addTyping();
-  document.getElementById('send-btn').disabled = true;
+  
+  const sendBtn = document.getElementById('send-btn');
+  if(sendBtn) sendBtn.disabled = true;
+  
   try {
     const reply = await callGroq(msg);
     if (reply) {
-      addLog('Response generated');
+      removeTyping();
+      addMessage('jarvis', reply);
       
-      // Wait for audio to actually start before revealing text, with a 2-second failsafe
-      let revealed = false;
-      const revealText = () => {
-        if (revealed) return;
-        revealed = true;
-        removeTyping();
-        addMessage('jarvis', reply);
-      };
+      const autoSpeakEl = document.getElementById('auto-speak');
+      const autoSpeak = autoSpeakEl ? autoSpeakEl.checked : true;
       
-      voiceEngine.speak(reply, revealText);
-      setTimeout(revealText, 1500); // Failsafe if audio is blocked by browser
-
+      // Trigger voice synchronously along with text generation. No delays.
+      if (autoSpeak) {
+        voiceEngine.speak(reply, () => {});
+      }
     } else {
       removeTyping();
     }
@@ -252,105 +273,78 @@ async function sendMessage() {
     removeTyping();
     const errMsg = 'My apologies, sir. I encountered an error: ' + e.message;
     addMessage('jarvis', errMsg);
-    addLog('ERROR: ' + e.message.substring(0, 30));
     showToast('Error: ' + e.message.substring(0, 50));
     setState('error');
     setTimeout(() => setState('standby'), 2000);
   } finally {
-    document.getElementById('send-btn').disabled = false;
+    if(sendBtn) sendBtn.disabled = false;
     if (!voiceEngine.isSpeaking) setState('standby');
   }
 }
 
 // ===================== CONTROLS =====================
-document.getElementById('send-btn').addEventListener('click', sendMessage);
+document.getElementById('send-btn')?.addEventListener('click', sendMessage);
 
 const textInput = document.getElementById('text-input');
-textInput.addEventListener('keydown', e => {
-  if (e.key === 'Enter' && !e.shiftKey) { 
-    e.preventDefault(); 
-    sendMessage(); 
-  }
-});
-textInput.addEventListener('input', function() {
-  this.style.height = 'auto';
-  this.style.height = (this.scrollHeight) + 'px';
-  document.getElementById('send-btn').disabled = this.value.trim().length === 0;
-});
+if(textInput) {
+  textInput.addEventListener('keydown', e => {
+    if (e.key === 'Enter' && !e.shiftKey) { 
+      e.preventDefault(); 
+      sendMessage(); 
+    }
+  });
+  textInput.addEventListener('input', function() {
+    this.style.height = 'auto';
+    this.style.height = (this.scrollHeight) + 'px';
+    const btn = document.getElementById('send-btn');
+    if(btn) btn.disabled = this.value.trim().length === 0;
+  });
+}
 
 // Settings Modal
 const settingsPanel = document.getElementById('settings-panel');
 const settingsOverlay = document.getElementById('settings-overlay');
-document.getElementById('settings-btn').addEventListener('click', () => {
-  settingsPanel.classList.remove('hidden');
-  settingsOverlay.classList.remove('hidden');
+document.getElementById('settings-btn')?.addEventListener('click', () => {
+  settingsPanel?.classList.remove('hidden');
+  settingsOverlay?.classList.remove('hidden');
 });
 const closeSettings = () => {
-  settingsPanel.classList.add('hidden');
-  settingsOverlay.classList.add('hidden');
+  settingsPanel?.classList.add('hidden');
+  settingsOverlay?.classList.add('hidden');
 };
-document.getElementById('close-settings').addEventListener('click', closeSettings);
-settingsOverlay.addEventListener('click', closeSettings);
+document.getElementById('close-settings')?.addEventListener('click', closeSettings);
+settingsOverlay?.addEventListener('click', closeSettings);
 
-// Model selector now uses Groq models
-document.getElementById('model-select').addEventListener('change', e => {
+// Model selector
+document.getElementById('model-select')?.addEventListener('change', e => {
   model = e.target.value;
-  addLog('Model switched: ' + model);
 });
 
 // Voice selector
 document.getElementById('voice-select')?.addEventListener('change', e => {
   voiceEngine.setVoice(e.target.value);
-  addLog('Voice: ' + e.target.value);
-  document.getElementById('voice-status').innerHTML =
-    '<div class="cap-dot"></div>Voice: ' + e.target.value.substring(0, 18);
 });
 
-document.getElementById('clear-btn').addEventListener('click', () => {
-  const area = document.getElementById('chat-area');
-  while (area.children.length > 0) area.removeChild(area.lastChild);
-  conversationHistory = []; queryCount = 0; tokenCount = 0;
-  addMessage('jarvis', 'Memory cleared. Starting fresh, sir. What would you like to work on?');
-  addLog('Memory wiped — new session');
-  voiceEngine.stop();
-  voiceEngine.speak('Memory cleared. Starting fresh, sir.');
-});
-
-document.getElementById('voice-speed').addEventListener('input', e => {
+document.getElementById('voice-speed')?.addEventListener('input', e => {
   voiceEngine.setRate(e.target.value);
-  document.getElementById('rate-val').textContent = parseFloat(e.target.value).toFixed(2);
+  const v = document.getElementById('rate-val');
+  if(v) v.textContent = parseFloat(e.target.value).toFixed(2) + 'x';
 });
 
-document.getElementById('voice-pitch').addEventListener('input', e => {
+document.getElementById('voice-pitch')?.addEventListener('input', e => {
   voiceEngine.setStability(1 - parseFloat(e.target.value));
-  document.getElementById('pitch-val').textContent = parseFloat(e.target.value).toFixed(2);
+  const p = document.getElementById('pitch-val');
+  if(p) p.textContent = parseFloat(e.target.value).toFixed(2);
 });
-
-document.getElementById('auto-speak').addEventListener('change', e => {
-  document.getElementById('stat-voice').textContent = e.target.checked ? 'ON' : 'OFF';
-});
-document.getElementById('stat-voice').textContent = 'ON';
-
-// Save/Engage button — not needed anymore but keep functional
-document.getElementById('save-key').addEventListener('click', () => {
-  showToast('✓ Already connected — Groq + ElevenLabs active');
-});
-
-addLog('JARVIS UI initialized');
 
 // ===================== AUTO-BOOT SEQUENCE =====================
 function bootJarvis() {
-  document.getElementById('api-key-input').value = '••••••••••••••••••••';
-  document.getElementById('conn-status').textContent = 'GROQ + ELEVENLABS';
-  document.getElementById('conn-status').style.color = 'var(--cg)';
-  addLog('Groq brain: ' + model);
-  addLog('ElevenLabs voice: ' + voiceEngine.getVoiceName());
-  showToast('✓ JARVIS neural core online');
+  loadHistory();
   setState('standby');
-
-  const area = document.getElementById('chat-area');
-  // keep the welcome message, but don't speak it automatically to avoid mobile autoplay block
-  // The welcome message is already in index.html in the new UI! We don't need to add it here.
+  
+  if (conversationHistory.length === 0) {
+      // Chat is empty, no welcome message spoken natively yet, it is handled via index.html HTML
+  }
 }
 
-setTimeout(bootJarvis, 1500);
+setTimeout(bootJarvis, 500);
