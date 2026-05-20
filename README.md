@@ -33,7 +33,7 @@ By combining cutting-edge language models (Groq) with industry-leading voice syn
 4.  **Instantaneous Flow:** By utilizing Groq, the traditional bottleneck of LLM generation speed is eliminated, creating a conversational flow that feels instantaneous.
 
 ## 🛠️ How It Was Built
-This project was designed and developed by **R JAN STEVE DANIEL**. It was built using a lightweight, highly optimized frontend stack to ensure maximum performance across all devices:
+This project was designed and developed by **Kallepalli Ram Adithya Pranav**. It was built using a lightweight, highly optimized frontend stack to ensure maximum performance across all devices:
 *   **Core:** HTML5, Vanilla JavaScript (ES6+), and pure CSS3 (no heavy UI frameworks).
 *   **Styling:** Custom CSS variables, smooth transitions, and modern Flexbox layouts.
 *   **Intelligence API:** Groq Cloud API for LLM inference.
@@ -65,5 +65,5 @@ While June A.I. is highly capable, it relies on third-party APIs which have spec
 ---
 <div align="center">
   <i>"I am fully operational and ready to assist you." — June A.I.</i><br><br>
-  <b>Designed and Developed by R JAN STEVE DANIEL</b>
+  <b>Designed and Developed by Kallepalli Ram Adithya Pranav</b>
 </div>
